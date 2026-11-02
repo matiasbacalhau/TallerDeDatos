@@ -1,0 +1,14 @@
+# Configuración del TP3 (decisiones tomadas con el grupo, 2/11/2026)
+entrada: ../archivos                 # CSV diarios del TP1 (solo lectura)
+salida: data                         # parquet derivados
+horizontes: todos                    # 1-48 h
+interpolacion:
+  max_horas_hueco: 3                 # se interpola solo si el hueco dura <= 3 h
+semilla: 42
+validacion:                          # walk-forward (decisión del grupo, 2/11/2026)
+  n_pliegues: 4                      # con >60 días de datos: subir a 5-6
+  dias_prueba: 5                     # días de cada bloque de prueba (subir a 7 con más datos)
+  gap_dias: 2                        # días descartados entre entrenamiento y prueba
+  dias_min_entrenamiento: 10
+features:                            # decisiones del 2/11/2026: familias 1-4
+  alfas_ewma: [0.05, 0.1, 0.2, 0.3]  # memoria del sesgo exponencial; se calibra en validación
