@@ -12,3 +12,11 @@ validacion:                          # walk-forward (decisión del grupo, 2/11/2
   dias_min_entrenamiento: 10
 features:                            # decisiones del 2/11/2026: familias 1-4
   alfas_ewma: [0.05, 0.1, 0.2, 0.3]  # memoria del sesgo exponencial; se calibra en validación
+calidad:                             # exclusión automática de días (acordado 10/11/2026, ver src/calidad_dias.py)
+  max_exceso_pp: 10                  # se excluye si % sin observación > mediana de referencia + 10 pp
+  ventana_dias: 14                   # días válidos anteriores que forman la referencia
+  min_dias_referencia: 7             # con menos días previos no se excluye nada
+  alarma_cobertura_min: 0.70         # alarma si un día incluido tiene cobertura total (real+interpolada) < 70 %
+  alarma_dias_utiles_min: 0.70       # alarma si en los últimos 14 días de calendario hay < 70 % de días usables
+  dias_historia: 3                   # un día válido tiene «historia incompleta» si falta o se excluyó alguno de
+                                     # los 3 días previos: los rezagos llegan hasta 55 h atrás (h=48, +2 h, media de 6)

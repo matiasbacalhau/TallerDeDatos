@@ -17,6 +17,7 @@ consecutivos y no se pisan. El gap evita que la última hora de entrenamiento y
 la primera de prueba compartan la memoria del error (~6 h) o el mismo régimen
 de tiempo.
 """
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -26,10 +27,29 @@ RAIZ = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())["validacion"]
 
 
-def dias_disponibles(carpeta=None):
-    """Días objetivo disponibles (un parquet por día en data/pares/)."""
+def dias_excluidos():
+    """Días que el control de calidad (src/calidad_dias.py) sacó del análisis."""
+    archivo = RAIZ / "data" / "calidad" / "dias_excluidos.json"
+    if not archivo.exists():
+        return set()
+    return {x["dia"] for x in json.loads(archivo.read_text())}
+
+
+def dias_historia_incompleta():
+    """Días válidos cuyos días previos faltan o fueron excluidos (rezagos degradados)."""
+    archivo = RAIZ / "data" / "calidad" / "historia_incompleta.json"
+    if not archivo.exists():
+        return set()
+    return {x["dia"] for x in json.loads(archivo.read_text())}
+
+
+def dias_disponibles(carpeta=None, excluir=True):
+    """Días objetivo disponibles (un parquet por día en data/pares/), sin los días excluidos
+    por calidad. Todo lo que entrena o evalúa pasa por acá, así la exclusión es automática."""
     carpeta = Path(carpeta) if carpeta else RAIZ / "data" / "pares"
-    return pd.DatetimeIndex(sorted(pd.to_datetime(p.stem, format="%Y_%m_%d") for p in carpeta.glob("*.parquet")))
+    fuera = dias_excluidos() if excluir else set()
+    return pd.DatetimeIndex(sorted(pd.to_datetime(p.stem, format="%Y_%m_%d")
+                                   for p in carpeta.glob("*.parquet") if p.stem not in fuera))
 
 
 def pliegues_walk_forward(dias, n_pliegues=None, dias_prueba=None, gap_dias=None, dias_min_entrenamiento=None):
@@ -48,7 +68,9 @@ def pliegues_walk_forward(dias, n_pliegues=None, dias_prueba=None, gap_dias=None
     for k in range(n_pliegues):
         a = inicio_pruebas + k * dias_prueba           # primer día de prueba (posición)
         prueba = dias[a:a + dias_prueba]
-        entrena = dias[:max(a - gap_dias, 0)]           # todo el pasado salvo el gap
+        # gap en días de CALENDARIO (puede haber días sin archivo): el último día de entrenamiento
+        # queda al menos gap_dias+1 días antes del primer día de prueba
+        entrena = dias[dias <= prueba.min() - pd.Timedelta(days=gap_dias + 1)]
         if len(entrena) < dias_min:
             raise ValueError(f"Pliegue {k+1}: solo {len(entrena)} días de entrenamiento "
                              f"(mínimo {dias_min}). Bajar n_pliegues/dias_prueba o esperar más datos.")

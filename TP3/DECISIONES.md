@@ -88,3 +88,82 @@ Código: `src/features.py` (genera `data/features/<dia>.parquet` y `familias.jso
 - **Viento:** dirección faltante (18,8 % de las filas) equivale a velocidad 0 km/h: se trata como calma (`viento_calmo`, sen/cos = 0).
 - **Condición:** 99,5 % en 6 grupos; 'otro' (0,5 %) son las heladas (`Frost`). Tormenta incluye `T-storms`, huracán y tormenta tropical.
 - **Asociación exploratoria (todas las filas reales, no un resultado de modelo):** correlación de `pendiente_pron` con el error = 0,35 (h = 6: 0,38; h = 24: 0,35; h = 48: 0,27); de `err_ult` = 0,04 a 6 h, 0,28 a 24 h y 0,20 a 48 h. Es coherente con el desfase de ~37 min de la observación, pero la correlación no prueba la causa.
+
+## Datos nuevos (16–29/10) y calidad (2/11/2026)
+
+- `archivos/` pasó de 35 a 47 días (10/9 → 29/10). Los 12 archivos nuevos venían como `forecast_observation_v2_DDMMYYYY.csv`; se **renombraron al formato único** `forecast_observation_YYYY_MM_DD.csv` (solo cambió el nombre). `preparar_datos.py` acepta los dos formatos.
+- **Días sin archivo:** 15/10, 27/10 y 28/10. El script los avisa y la validación usa días de calendario para el gap.
+- **Falla de observaciones.** Fracción de filas sin observación emparejada (`unmatched`, normal 4–5 %):
+  - 19/10: 18 % (2 horas con todas las estaciones sin observación); 20/10: 15 % (1 hora); 22/10: 44 % (10 horas con >90 %).
+  - **23 al 26/10: 56–57 %.** Cada día, **272 de 519 estaciones no tienen ninguna observación** (contra 9–13 habituales), y son **las mismas 272 los cuatro días**. Están repartidas en 23 estados (FL 91 %, VT 83 %, GA 78 %… NY 25 %) y sus códigos van de `012MD` a `WINM6`, así que no es un bloque geográfico ni alfabético.
+  - **Causa confirmada (10/11):** fue una falla del NWS, no de nuestra Lambda ni de la fusión.
+- **Decisión (10/11, acordada con el docente):** esos días salen del análisis. La exclusión **no es una lista manual**: la hace una regla automática (sección siguiente), que los detecta sola.
+
+## Calidad de los datos: exclusión automática de días y alarmas (10/11/2026)
+
+**Principio:** el producto recibe datos nuevos todo el tiempo; agregar días no puede romper el pipeline ni requerir tocar código. Por eso la decisión de excluir un día sale de una regla que se aplica a cada día que llega, y queda registrada con el dato que la justifica.
+
+- **Regla (relativa):** un día se excluye si su % de filas sin observación supera en más de **10 pp** la **mediana de los 14 días válidos anteriores** (mínimo 7 días de referencia). La referencia usa solo días válidos, así una falla larga no se vuelve «normal».
+- **Por qué relativa y no un umbral fijo (X %):** el nivel normal cambia. En septiembre hay ~25 % de filas sin observación (cobertura total 72–82 %), en octubre ~7 %. Un umbral del 15 % sacaría casi todo septiembre; uno del 30 % dejaría pasar el 19 y el 20/10.
+- **Alarmas (solo avisan, no excluyen):**
+  - Por día: cobertura total (real + interpolada) < 70 % en un día incluido. Detecta degradaciones lentas que la regla relativa iría absorbiendo. Se mide sobre la total y no sobre la real porque la real de septiembre es 64–70 % y la alarma sonaría siempre.
+  - Del sistema: menos del 70 % de días usables en los últimos 14 días de calendario.
+- **Resultado con los 47 días actuales:** se excluyen **19, 20 y 22–26/10** (7 días; quedan 40). El 21/10 (7,7 % sin observación) queda. Ningún día incluido dispara la alarma por día; la del sistema sí suena (5 de 14 días usables entre 16 y 29/10: faltan además los archivos de 27 y 28/10).
+
+  | Día | Sin observación | Referencia | Estaciones sin obs. |
+  |---|---|---|---|
+  | 19/10 | 21,7 % | 7,3 % | 13/519 |
+  | 20/10 | 17,9 % | 7,3 % | 11/519 |
+  | 22/10 | 48,1 % | 7,3 % | 18/519 (10 h de apagón) |
+  | 23–26/10 | 55,9–58,3 % | 7,3 % | 281–282/519 |
+
+- **Dónde queda documentado:** `data/calidad/REGISTRO_CALIDAD.md` (se regenera en cada corrida, con los avisos de cambios en la lista), `calidad_por_dia.csv` y `dias_excluidos.json`. Parámetros en `config.yaml` (`calidad:`).
+- **Cómo se aplica:** `validacion.dias_disponibles()` quita los excluidos, así que baselines y modelos no los ven sin cambiar código. Las features se calculan igual para todos los días: las observaciones reales de un día excluido pueden servir de rezago a días posteriores.
+- **Controles:** un día nuevo normal simulado queda incluido; uno con 60 % de faltantes queda excluido con aviso; un día con 65 % de cobertura que pasa la regla (contexto tipo septiembre) dispara la alarma. Una segunda corrida no reescribe nada.
+- **Un solo comando:** `src/pipeline.py` corre preparación → calidad → validación → baselines → features → verificación, y se detiene si algún control falla.
+- **Pendiente:** entender por qué septiembre tiene ~25 % de filas sin observación contra ~7 % en octubre.
+
+## Baselines con todos los días disponibles (10/11/2026)
+
+Datos: 47 días (10/9 → 29/10), 7 excluidos por calidad → **40 días**. 4 pliegues; las pruebas cubren 30/9–4/10, 5–9/10, 10–14/10 y 16/10–29/10. El último bloque tiene 5 días con datos válidos (16, 17, 18, 21 y 29/10), repartidos en dos semanas de calendario por los días excluidos y sin archivo.
+
+MAE medio de los 4 pliegues (°C, filas reales); entre paréntesis, el valor con 35 días:
+
+| Horizonte | B0 NWS crudo | B1 global | B2 estación×hora | B3 persistencia |
+|---|---|---|---|---|
+| todos | 1,486 (1,474) | 1,490 (1,475) | **1,389** (1,389) | 1,976 (1,943) |
+| 1 h | 1,354 (1,334) | 1,358 (1,337) | **1,265** (1,263) | 1,279 (1,244) |
+| 3 h | 1,375 | 1,378 | **1,281** | 1,619 |
+| 6 h | 1,391 | 1,394 | **1,293** | 1,914 |
+| 12 h | 1,406 | 1,412 | **1,330** | 2,074 |
+| 24 h | 1,488 | 1,491 | **1,387** | 1,755 |
+| 48 h | 1,645 (1,604) | 1,644 (1,600) | **1,543** (1,511) | 2,015 (2,008) |
+
+RMSE (todos): 1,882 / 1,887 / 1,761 / 2,536. Sesgo residual: +0,007 / −0,073 / −0,041 / +0,062.
+
+Lecturas:
+- B2 sigue siendo el mejor baseline y ahora mejora a B0 un **6,5 %** en MAE (5,8 % con 35 días).
+- B3 pierde a 1 h en el promedio de los 4 pliegues (1,279 contra 1,265 de B2), pero **es por el pliegue 4**: en los días con historia completa gana por poco (1,257 contra 1,262), igual que con 35 días. Ver la sección siguiente.
+- B1 sigue sin mejorar a B0: el sesgo global no es estable entre semanas.
+- El MAE por pliegue de B0 varía de 1,39 a 1,55: la dificultad cambia entre semanas, de modo que las comparaciones entre modelos deben hacerse siempre pliegue a pliegue.
+- En el pliegue 4 solo el 50 % de las filas de prueba tiene B2 y B3 definidos (75–78 % en los demás): faltan rezagos porque sus fuentes caen en días excluidos o sin archivo.
+
+## Días con historia incompleta y métricas por segmento (10/11/2026)
+
+- **Regla:** un día válido (no excluido) tiene **historia incompleta** si falta o se excluyó alguno de los **3 días de calendario previos**. La marca **no excluye**: el target del día es bueno; lo que falta es parte de sus features con memoria (rezagos).
+- **Por qué 3 días:** los rezagos llegan hasta 55 h atrás (h = 48, más 2 h de latencia, más la media de 6 h). Parámetro: `calidad.dias_historia`.
+- **Para qué:** separar dos preguntas que el promedio mezcla. **Historia completa:** cuánto corrige el modelo con toda su información; es la **comparación entre modelos del informe**. **Historia incompleta:** cuánto corrige cuando le falta la historia reciente; mide la robustez ante caídas de la fuente, que en producción van a repetirse.
+- **Dónde queda:** la lista de días marcados se genera en cada corrida en `data/calidad/REGISTRO_CALIDAD.md` y `historia_incompleta.json`. Los resultados de baselines (y de los modelos) llevan la columna `segmento` (todas / completa / incompleta).
+
+MAE (°C, filas reales):
+
+| Segmento | Pliegues | B0 NWS | B1 global | B2 estación×hora | B3 persistencia | B3 a 1 h | B2 a 1 h |
+|---|---|---|---|---|---|---|---|
+| completa | 1–3 | 1,476 | 1,482 | **1,393** | 1,953 | **1,257** | 1,262 |
+| incompleta | 4 | 1,516 | 1,513 | **1,377** | 2,046 | 1,345 | **1,273** |
+| todas | 1–4 | 1,486 | 1,490 | **1,389** | 1,976 | 1,279 | 1,265 |
+
+Lecturas:
+- B2 no usa rezagos, así que rinde igual en los dos segmentos (1,393 y 1,377). La persistencia (B3) es la que más se degrada: a 1 h pasa de 1,257 a 1,345.
+- **Límite:** B3 solo se mide donde su rezago existe (las mismas filas para todos), así que el segmento «incompleta» de los baselines subestima el problema: las filas sin rezago no entran. En los modelos sí se evaluarán todas las filas, y ahí se verá cómo manejan los faltantes (LightGBM de forma nativa; el lineal con imputación más una variable indicadora).
+- El segmento «incompleta» es un solo pliegue de 5 días: sirve para describir, no para concluir.

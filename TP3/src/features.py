@@ -9,6 +9,11 @@ que "aprender" del entrenamiento, así que se generan una sola vez para todas la
   3. Rezagos      últimos errores conocidos de la misma estación y el mismo horizonte
   4. Sesgo EWMA   promedio exponencial de días del error por estación y hora (tipo NBM)
 
+DÍAS EXCLUIDOS POR CALIDAD (src/calidad_dias.py): las features se calculan para todos los días. Las
+observaciones REALES de un día excluido pueden servir de rezago a días posteriores (son correctas,
+solo incompletas); lo que no hace es aparecer como fila de entrenamiento ni de prueba, porque los
+pliegues salen de validacion.dias_disponibles(), que ya los quita.
+
 REGLA DE CAUSALIDAD: la fuente más reciente que se usa es la hora  objetivo - horizonte - 2 h.
 (La observación de la hora H puede llegar hasta H+59 min y el pronóstico se genera entre 60 min
 antes y 20 min después de objetivo - horizonte.)  Solo se usan observaciones REALES.

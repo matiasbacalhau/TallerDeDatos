@@ -15,6 +15,7 @@ Uso:  .venv/bin/python src/preparar_datos.py            # incremental
 from pathlib import Path
 import glob
 import json
+import re
 import sys
 
 import numpy as np
@@ -36,6 +37,19 @@ COLUMNAS = [
     "wind_speed_forecast_kmh", "wind_direction_forecast", "precip_probability_forecast_pct",
     "short_forecast", "match_type", "temperature_observed_c",
 ]
+
+
+def dia_de_archivo(ruta):
+    """'YYYY_MM_DD' a partir del nombre. Acepta forecast_observation_2026_10_14.csv y
+    forecast_observation_v2_16102026.csv (DDMMYYYY), los dos formatos que hubo en la entrega."""
+    nombre = Path(ruta).stem
+    m = re.search(r"(\d{4})_(\d{2})_(\d{2})$", nombre)
+    if m:
+        return "_".join(m.groups())
+    m = re.search(r"(\d{2})(\d{2})(\d{4})$", nombre)
+    if m:
+        return f"{m.group(3)}_{m.group(2)}_{m.group(1)}"
+    raise ValueError(f"No se reconoce la fecha en {nombre}")
 
 
 def leer_dia(csv):
@@ -83,13 +97,21 @@ def main(rehacer=False):
     for sub in ("dias_crudos", "obs_dia", "pares"):
         (SALIDA / sub).mkdir(parents=True, exist_ok=True)
     dias_dir, obs_dir, pares_dir = SALIDA / "dias_crudos", SALIDA / "obs_dia", SALIDA / "pares"
-    archivos = sorted(glob.glob(str(ENTRADA / "forecast_observation_2026_*.csv")))
+    archivos = sorted(glob.glob(str(ENTRADA / "forecast_observation_2026_*.csv"))
+                      + glob.glob(str(ENTRADA / "forecast_observation_v2_*.csv")), key=dia_de_archivo)
+    dias = [dia_de_archivo(f) for f in archivos]
+    repetidos = {x for x in dias if dias.count(x) > 1}
+    assert not repetidos, f"días con más de un archivo: {sorted(repetidos)}"
+    fechas = pd.to_datetime(dias, format="%Y_%m_%d")
+    faltan = pd.date_range(fechas.min(), fechas.max()).difference(fechas)
+    if len(faltan):
+        print("AVISO: días sin archivo:", [x.strftime("%d/%m") for x in faltan])
     print(f"{len(archivos)} archivos diarios en la entrada")
 
     # --- Paso 1 y 2: parquet por día + observaciones únicas (solo días nuevos) ---------
     nuevos = 0
     for f in archivos:
-        dia = Path(f).stem[-10:]
+        dia = dia_de_archivo(f)
         if not rehacer and (dias_dir / f"{dia}.parquet").exists() and (obs_dir / f"{dia}.parquet").exists():
             continue
         d = leer_dia(f)
