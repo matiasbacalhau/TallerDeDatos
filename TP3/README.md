@@ -8,6 +8,30 @@ Hecho: preparación de datos, control de calidad con exclusión automática de d
 Hecho también: modelo interpretable (regresión lineal Ridge con curvas, variables por criterio meteorológico).
 Pendiente: informe y presentación.
 
+## Ver el dashboard (Etapa C)
+
+No hacen falta los datos crudos ni correr el pipeline: los datos del dashboard están en `app/datos/` (~17 MB).
+Requiere Python 3.11 o más nuevo y git.
+
+macOS o Linux:
+```bash
+git clone https://github.com/matiasbacalhau/TallerDeDatos.git
+cd TallerDeDatos && git checkout AvancesTP3Matias && cd TP3
+python3 -m venv .venv-app && .venv-app/bin/pip install -r app/requirements.txt
+.venv-app/bin/streamlit run app/dashboard.py
+```
+
+Windows (PowerShell):
+```powershell
+git clone https://github.com/matiasbacalhau/TallerDeDatos.git
+cd TallerDeDatos; git checkout AvancesTP3Matias; cd TP3
+py -3 -m venv .venv-app; .venv-app\Scripts\pip install -r app/requirements.txt
+.venv-app\Scripts\streamlit run app/dashboard.py
+```
+
+Se abre en el navegador en http://localhost:8501. La primera carga tarda unos segundos (4,6 millones de filas).
+Para regenerar `app/datos/` con datos nuevos: correr el pipeline completo y después `src/preparar_dashboard.py`.
+
 ## Cómo reproducir
 Los datos no están en el repo (pesan ~700 MB). Hacen falta los CSV diarios del TP1
 (`forecast_observation_2026_MM_DD.csv`); en `config.yaml`, `entrada` es la carpeta donde están.

@@ -8,8 +8,12 @@ Confianza del pronóstico corregido = banda empírica del error que queda despu�
   - Se muestra sobre los pliegues de REPORTE (3–4), que no se usaron para calibrar, y se informa qué
     fracción de las observaciones cayó dentro de la banda (lo esperado: ~80 %).
 
-Salidas en data/dashboard/: filas.parquet (una fila por estación × hora objetivo × horizonte con observación
-real), bandas.csv, cobertura.csv y estaciones.parquet.
+Salidas en app/datos/ (versionadas en git, ~17 MB, para que el dashboard corra sin los datos crudos):
+  - filas.parquet: una fila por estación × hora objetivo × horizonte con observación real; la hora objetivo
+    va como horas desde T0 (int32) y las temperaturas redondeadas a 0,01 °C, para que el archivo sea chico;
+  - bandas.csv: percentiles por modelo × tramo × condición, ya con el respaldo por tramo aplicado (la app
+    los une a las filas al cargar);
+  - cobertura.csv y estaciones.parquet.
 
 Uso:  .venv/bin/python src/preparar_dashboard.py   (después de modelo_interpretable.py y modelo_lgbm.py)
 """
@@ -23,7 +27,8 @@ import modelo_lgbm as ML
 from modelado import RAIZ, cargar_entrenamiento, dias_historia_incompleta, hora_solar, pliegues_eleccion_reporte, cargar_prueba
 
 RES = RAIZ / "data" / "resultados"
-SALIDA = RAIZ / "data" / "dashboard"
+SALIDA = RAIZ / "app" / "datos"
+T0 = pd.Timestamp("2026-01-01", tz="UTC")       # origen de la hora objetivo en filas.parquet
 TRAMOS = [(1, 3), (4, 6), (7, 12), (13, 24), (25, 36), (37, 48)]
 MIN_GRUPO = 2000
 MODELOS = ("lineal", "lgbm")
@@ -97,7 +102,6 @@ def main():
 
     C = predecir(eleccion, hp_lin, hp_gbm)
     B = calibrar(C)
-    B.to_csv(SALIDA / "bandas.csv", index=False)
     del C
 
     D = aplicar(predecir(reporte, hp_lin, hp_gbm), B)
@@ -116,9 +120,18 @@ def main():
     est = est.assign(station_id=est["station_id"].astype(str)).drop_duplicates("station_id")
     est = est.rename(columns={"state": "estado", "latitude": "lat", "longitude": "lon"})
     est.to_parquet(SALIDA / "estaciones.parquet", index=False)
+    # bandas resueltas (las que efectivamente se aplicaron) por modelo × tramo × condición
+    R = D.groupby(["tramo", "condicion"], observed=True)[[f"{m}_{q}" for m in MODELOS for q in ("q10", "q90")]].first()
+    R.round(3).reset_index().to_csv(SALIDA / "bandas.csv", index=False)
+    D = D.drop(columns=list(R.columns))
+    D["target_time_utc"] = ((D["target_time_utc"] - T0) / pd.Timedelta(hours=1)).astype("int32")
+    D = D.rename(columns={"target_time_utc": "horas_desde_t0"})
+    for c in ("nws", "obs", "lineal", "lgbm"):
+        D[c] = D[c].round(2).astype("float32")
     for c in ("station_id", "condicion", "tramo", "historia"):
         D[c] = D[c].astype("category")
-    D.to_parquet(SALIDA / "filas.parquet", index=False)
+    D = D.sort_values(["station_id", "horizonte", "horas_desde_t0"])
+    D.to_parquet(SALIDA / "filas.parquet", index=False, compression="zstd", compression_level=19)
 
     print("\ncobertura de la banda P10–P90 en los pliegues de reporte (esperado ~0,80):")
     print(pd.DataFrame(cob).query("pliegue == 0")[["modelo", "cobertura", "n"]].round(3).to_string(index=False))

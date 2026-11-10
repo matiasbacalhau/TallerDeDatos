@@ -1,0 +1,6 @@
+# Solo lo que necesita el dashboard (el pipeline completo usa ../requirements.txt). Python 3.11 o más nuevo.
+streamlit==1.66.1
+plotly==7.1.0
+pandas==3.1.0
+pyarrow==26.0.0
+numpy==2.4.6

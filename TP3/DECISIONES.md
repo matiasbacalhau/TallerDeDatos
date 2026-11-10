@@ -345,6 +345,9 @@ Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `da
 Código: `app/dashboard.py`, con los datos de `src/preparar_dashboard.py`. Se corre desde `TP3/` con `.venv/bin/streamlit run app/dashboard.py`.
 
 - **Herramienta:** Streamlit con Plotly, en Python como el resto del pipeline. Se entrega como código ejecutable.
+- **Que cualquiera pueda correrlo** (pedido del 10/11/2026): los datos del dashboard se versionan en `app/datos/` (~17 MB, comprimidos con zstd). Así el dashboard corre sin los datos crudos (17 GB) y sin el pipeline. La app solo necesita `app/requirements.txt` (5 paquetes con versión fija, Python ≥ 3.11), y los pasos están en el README.
+  - **Prueba:** se copió lo que va al repo a una carpeta aparte, se creó un entorno nuevo con esos requisitos y se corrió la app con `streamlit.testing`. Funcionó sin errores, y con filtros dio los mismos números que la versión de trabajo.
+  - **Para actualizarlo con datos nuevos:** correr el pipeline completo y después `src/preparar_dashboard.py`.
 - **Identidad visual: propuesta A, de taste-skill**, estilo «libro contable acromático». Se eligió frente a la B (Carbon de IBM, del catálogo awesome-design-md).
   - **Paleta:** fondo gris azulado #f2f4f7, tarjetas blancas, tinta #0a0a0a y gris #6b6b6b.
   - **Color:** el único color es el azul #1d5fbf del pronóstico corregido y su banda. Verde y rojo marcan solo la mejora o el empeoramiento.

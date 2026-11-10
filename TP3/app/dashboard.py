@@ -1,11 +1,12 @@
 """Dashboard del TP3 (Etapa C): confianza del pronóstico de temperatura del NWS y su corrección.
 
 Pregunta de la pantalla: ¿cuánto confiar en el pronóstico y cuánto lo mejora la corrección?
-Datos: días de prueba de los pliegues de reporte (fuera de muestra), preparados por src/preparar_dashboard.py.
+Datos: días de prueba de los pliegues de reporte (fuera de muestra), preparados por src/preparar_dashboard.py
+y versionados en app/datos/: el dashboard corre sin los datos crudos ni el resto del pipeline.
 Estilo: A, «libro contable acromático» (taste-skill): la interfaz sin color; el azul marca solo el pronóstico
 corregido y su banda de confianza.
 
-Uso (desde TP3/):  .venv/bin/streamlit run app/dashboard.py
+Uso (desde TP3/):  streamlit run app/dashboard.py   (instalación: ver README, «Ver el dashboard»)
 """
 from pathlib import Path
 
@@ -15,7 +16,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 RAIZ = Path(__file__).resolve().parents[1]
-DATOS = RAIZ / "data" / "dashboard"
+DATOS = Path(__file__).resolve().parent / "datos"
+T0 = pd.Timestamp("2026-01-01", tz="UTC")       # origen de horas_desde_t0 (src/preparar_dashboard.py)
 
 # tokens del estilo A
 TINTA, GRIS, BORDE, REGLA, FONDO, BLANCO = "#0a0a0a", "#6b6b6b", "#e6e6e6", "#f0f0f0", "#f2f4f7", "#ffffff"
@@ -54,6 +56,11 @@ def num(x, d=2):
 @st.cache_resource
 def cargar():
     D = pd.read_parquet(DATOS / "filas.parquet")
+    D.insert(1, "target_time_utc", T0 + pd.to_timedelta(D.pop("horas_desde_t0"), unit="h"))
+    B = pd.read_csv(DATOS / "bandas.csv", dtype={"tramo": "string", "condicion": "string"})
+    D = D.join(B.set_index(["tramo", "condicion"]), on=["tramo", "condicion"])
+    for c in B.columns[2:]:
+        D[c] = D[c].astype("float32")
     E = pd.read_parquet(DATOS / "estaciones.parquet").set_index("station_id")
     D = D.join(E["estado"], on="station_id")
     return D, E
