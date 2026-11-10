@@ -16,7 +16,7 @@ Requiere Python 3.11 o más nuevo y git.
 macOS o Linux:
 ```bash
 git clone https://github.com/matiasbacalhau/TallerDeDatos.git
-cd TallerDeDatos && git checkout AvancesTP3Matias && cd TP3
+cd TallerDeDatos/TP3
 python3 -m venv .venv-app && .venv-app/bin/pip install -r app/requirements.txt
 .venv-app/bin/streamlit run app/dashboard.py
 ```
@@ -24,7 +24,7 @@ python3 -m venv .venv-app && .venv-app/bin/pip install -r app/requirements.txt
 Windows (PowerShell):
 ```powershell
 git clone https://github.com/matiasbacalhau/TallerDeDatos.git
-cd TallerDeDatos; git checkout AvancesTP3Matias; cd TP3
+cd TallerDeDatos\TP3
 py -3 -m venv .venv-app; .venv-app\Scripts\pip install -r app/requirements.txt
 .venv-app\Scripts\streamlit run app/dashboard.py
 ```
