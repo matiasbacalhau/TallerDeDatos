@@ -25,6 +25,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/features.py           # variables (familias 1-4) por día
 .venv/bin/python src/verificar_features.py # controles de causalidad y recálculo independiente
 .venv/bin/python src/modelo_interpretable.py # elige el α del sesgo (pliegues 1-2) y reporta (3-4)
+.venv/bin/python src/modelo_lgbm.py         # elige grilla y árboles (pliegues 1-2) y reporta (3-4)
 ```
 
 ## Archivos
@@ -35,5 +36,6 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/baselines.py` — NWS crudo, sesgo global, sesgo por estación × hora solar, persistencia.
 - `src/features.py`, `src/verificar_features.py` — variables conocidas al emitir el pronóstico y su control.
 - `src/modelado.py`, `src/modelo_interpretable.py` — piezas comunes de los modelos y la regresión lineal con curvas.
+- `src/modelo_lgbm.py` — LightGBM con todas las features; compara contra B0, B2 y el modelo interpretable.
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación, α del sesgo exponencial).

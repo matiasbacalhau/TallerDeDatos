@@ -223,6 +223,31 @@ Código: `src/modelo_interpretable.py` (las piezas comunes a los dos modelos est
 - **Sesgo exponencial:** 0,22–0,27 °C de corrección por cada °C de sesgo histórico. El resto lo reparten la curva horaria y los demás términos.
 - **Pendiente para la Etapa B:** graficar las curvas (hora solar, `pendiente_pron`, `temp_anom`, `dep_rocio`, `viento_vel` y el peso de `err_ult` según el horizonte) con sus unidades.
 
+### Resultados de LightGBM (10/11/2026)
+
+Código: `src/modelo_lgbm.py`. Salidas en `data/resultados/lgbm_*`, con los modelos de los pliegues de reporte en `lgbm_pliegue_*.txt`.
+
+- **Variables:** todas las familias de `features.py`. `condicion` va como categórica. No usa `station_id`: el sesgo de cada estación entra por los sesgos exponenciales. No se imputan faltantes.
+- **Grilla (pliegues 1–2):** `num_leaves` ∈ {31, 127} × objetivo ∈ {L2, L1}, con la cantidad de árboles en cortes cada 50, de 50 a 500. Quedan fijos `learning_rate` 0,05, `min_child_samples` 500, `feature_fraction` y `bagging_fraction` 0,8, y `lambda_l2` 1 (`config.yaml`).
+- **Elegido:** 31 hojas, objetivo L1 y **300 árboles** (MAE 1,218 con historia completa, contra 1,237 del Ridge en los mismos pliegues). La curva es plana alrededor del óptimo: de 250 a 500 árboles con 31 hojas y L1 la diferencia es menor a 0,002 °C, y 127 hojas con 100 árboles empata (1,218).
+- **Grilla corregida, con el reporte ya visto.**
+  - **Primera grilla:** cortes cada 250, de 250 a 2000. El óptimo quedó en el borde (250 árboles), y el error subía con más árboles en las cuatro configuraciones, más rápido con 127 hojas. Con ~20 días de entrenamiento, y las filas repetidas por horizonte, el modelo se sobreajusta rápido.
+  - **Corrección:** se re-corrió con cortes más finos. La elección siguió usando solo los pliegues 1–2.
+  - **Ya se habían visto los pliegues de reporte** de la primera grilla (MAE todas 1,324). El cambio fue por el borde, no por ese resultado, y el reporte casi no cambió (1,325).
+- **Reporte (pliegues 3–4), MAE en °C sobre las mismas filas:**
+
+  | Segmento | Pliegues | B0 | B2 | Lineal | LightGBM | 1 h: lineal / LGBM | 48 h: lineal / LGBM |
+  |---|---|---|---|---|---|---|---|
+  | completa | 3 | 1,555 | 1,471 | 1,402 | **1,382** | **1,049** / 1,071 | **1,638** / 1,651 |
+  | incompleta | 4 | 1,532 | 1,399 | 1,301 | **1,267** | **1,064** / 1,102 | 1,429 / **1,398** |
+  | todas | 3–4 | 1,544 | 1,435 | 1,351 | **1,325** | **1,057** / 1,087 | 1,533 / **1,525** |
+
+  - **Contra el Ridge:** con historia completa mejora un 1,4 %. Contra el NWS crudo mejora un 11,1 %, y contra B2 un 6,0 %.
+  - **A 1 h gana el Ridge**, que tiene explícito el término `err_ult` × horizonte.
+  - **RMSE (todas):** 1,773 y 1,636 °C, contra 1,863 y 1,762 de B2.
+  - **Sesgo del pliegue 3:** sigue en −0,30 °C, igual que B2. Ninguno de los dos corrige el cambio de régimen de esa semana.
+- **Importancia** (fracción de la ganancia): pendiente del pronóstico 0,13, sesgos exponenciales 0,21 en conjunto, hora solar 0,10, latitud y longitud 0,10 en conjunto, `err_ult` 0,01.
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.

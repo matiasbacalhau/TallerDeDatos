@@ -25,3 +25,13 @@ modelos:                             # decisiones del 10/11/2026 (ver DECISIONES
   interpretable:                     # Ridge con curvas (spline); variables por criterio meteorológico
     ridge_alpha: 1.0                 # penalización chica y fija, solo por estabilidad numérica
     umbral_calma_kmh: 10             # enfriamiento nocturno: viento pronosticado < 10 km/h (~3 m/s)
+  lgbm:                              # minimizar el error; grilla chica elegida en los pliegues de elección
+    num_leaves: [31, 127]            # grilla: complejidad de cada árbol
+    objetivos: [regression, regression_l1]   # L2 o L1 (el criterio de elección es MAE)
+    max_arboles: 500                 # primera grilla (250-2000, cada 250) dejó el óptimo en el borde
+    paso_arboles: 50                 # cortes para elegir la cantidad de árboles
+    learning_rate: 0.05              # fijos (valores usuales, no se ajustan)
+    min_child_samples: 500           # las filas se repiten por horizonte: hojas con pocas filas son pocas situaciones
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    lambda_l2: 1.0
