@@ -1,0 +1,21 @@
+# Estilo A (taste-skill, «achromatic ledger»), elegido el 10/11/2026: la interfaz sin color, el azul solo en el
+# pronóstico corregido. Los tokens completos están en app/dashboard.py (CSS) y en DECISIONES.md, Etapa C.
+[theme]
+base = "light"
+primaryColor = "#141414"
+backgroundColor = "#f2f4f7"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0a0a0a"
+font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&display=swap"
+baseRadius = "6px"
+borderColor = "#e6e6e6"
+showWidgetBorder = true
+
+[server]
+headless = true
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

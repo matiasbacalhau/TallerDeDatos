@@ -44,7 +44,7 @@ El grupo actualiza `archivos/` periódicamente (> 60 días al momento del inform
 
 ## Etapa A — Baselines (2/11/2026)
 
-- **Hora local = hora solar** (hora UTC + longitud/15, redondeada). No tiene el salto del cambio de hora civil del 1/11/2026 y sigue el ciclo del sol. En el dashboard se convierte a hora civil para mostrarla.
+- **Hora local = hora solar** (hora UTC + longitud/15, redondeada). No tiene el salto del cambio de hora civil del 1/11/2026 y sigue el ciclo del sol. El dashboard también muestra la hora solar (ver Etapa C).
 - **Baselines (la consigna dice «modelos baseline», en plural):** B0 NWS crudo (c = 0), B1 sesgo global, B2 sesgo por estación × hora solar, B3 persistencia del último error conocido. Un tramo por horizonte en B2 no mejoró (1,398 contra 1,396) y se descartó.
 - **Aprenden solo con observaciones reales del entrenamiento.** Se evalúan con filas reales y con reales + interpoladas, siempre sobre las **mismas filas** (donde B2 y B3 están definidos; 75–79 % de las filas de prueba).
 - **Causalidad de B3:** la observación de la hora H puede llegar hasta H + 59 min y el pronóstico se genera entre 60 min antes y 20 min después de «objetivo − horizonte». Por eso el último error usable es el de la hora objetivo − horizonte − 2. Una primera versión usaba objetivo − horizonte y daba 0,703 °C a 1 h: era leakage (el valor correcto es 1,24). `prueba_causalidad` lo controla en cada corrida (14,2 M de filas, 0 violaciones).
@@ -339,4 +339,33 @@ Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `da
   - **Modelos:** 0,60–0,63 a 1 h, ~0,50–0,54 a 6–12 h y 0,39–0,41 a 48 h. Explican entre el 15 % y el 40 % de la varianza del error.
   - **`err_ult` solo:** cae a ~0 en 6 h y oscila con el ciclo diario. Es positivo cuando la fuente cae cerca de la misma hora del día anterior (h ≈ 22) y negativo cuando cae en la fase opuesta.
 - **Pendiente para el informe:** elegir qué figuras van y redactarlas.
+
+## Etapa C — Dashboard (10/11/2026)
+
+Código: `app/dashboard.py`, con los datos de `src/preparar_dashboard.py`. Se corre desde `TP3/` con `.venv/bin/streamlit run app/dashboard.py`.
+
+- **Herramienta:** Streamlit con Plotly, en Python como el resto del pipeline. Se entrega como código ejecutable.
+- **Identidad visual: propuesta A, de taste-skill**, estilo «libro contable acromático». Se eligió frente a la B (Carbon de IBM, del catálogo awesome-design-md).
+  - **Paleta:** fondo gris azulado #f2f4f7, tarjetas blancas, tinta #0a0a0a y gris #6b6b6b.
+  - **Color:** el único color es el azul #1d5fbf del pronóstico corregido y su banda. Verde y rojo marcan solo la mejora o el empeoramiento.
+  - **Tipografía:** Geist.
+  - **Archivos:** los tokens están en `.streamlit/config.toml` y en el CSS de la app.
+- **Pregunta de la pantalla:** ¿cuánto confiar en el pronóstico y cuánto lo mejora la corrección?
+- **Contenido:**
+  - **Indicadores:** error del NWS, error corregido, mejora y cobertura de la banda.
+  - **Serie de una estación:** observado, pronóstico del NWS y corregido con su banda, para un horizonte elegido.
+  - **Gráficos de error:** por horizonte y por hora del día.
+  - **Mapa:** mejora por estación.
+  - **Lista:** las estaciones donde la corrección menos ayuda.
+  - **Descarga:** las filas filtradas, hasta 50 000.
+- **Filtros:** corrección (Ridge o LightGBM), horizonte, hora solar local, condición del tiempo y estados.
+- **Datos:** solo los días de prueba de los pliegues de reporte (3–4), que los modelos no vieron al entrenar. Son 4,6 millones de filas con observación real.
+- **Confianza del pronóstico** (banda empírica):
+  - **Calibración:** percentiles 10 y 90 del error que queda después de corregir, medidos en las pruebas de los pliegues de elección (1–2), por tramo de horizonte × condición del tiempo. Si un grupo tiene menos de 2000 filas, se usa solo el tramo.
+  - **Cobertura real en los pliegues de reporte:** 75 % (Ridge 0,751, LightGBM 0,756), contra el 80 % esperado. Baja a ~72 % a 37–48 h y a 68 % con lluvia. El dashboard muestra la cobertura real junto a la esperada.
+  - **Sin niveles de confianza:** se descartó la etiqueta «alta / media / baja». El ancho de la banda varía poco (3,1–4,7 °C según horizonte y condición), así que la etiqueta no informaría nada.
+- **Hora solar en lugar de hora civil:** no tenemos la zona horaria de cada estación, y AL, MS y parte de TN, KY y FL están en la hora Central. El filtro y los gráficos usan la hora solar local, la misma que usan los modelos, y se rotula así.
+- **Lo que muestra con los filtros** (para el informe):
+  - **Con lluvia:** el Ridge mejora un 3,9 % y LightGBM un 1,5 %, contra 12,4 % y 14,2 % sin filtro.
+  - **Límite conocido:** al cambiar los filtros, la estación elegida puede volver a la primera de la lista.
 

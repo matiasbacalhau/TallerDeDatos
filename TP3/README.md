@@ -6,7 +6,7 @@ justificación están en `DECISIONES.md` (se actualiza a medida que avanza el tr
 ## Estado
 Hecho: preparación de datos, control de calidad con exclusión automática de días y alarmas, validación walk-forward, baselines (B0–B3) y feature engineering (familias 1–4).
 Hecho también: modelo interpretable (regresión lineal Ridge con curvas, variables por criterio meteorológico).
-Pendiente: modelo de mínimo error, interpretabilidad (Etapa B), dashboard (Etapa C) e informe.
+Pendiente: informe y presentación.
 
 ## Cómo reproducir
 Los datos no están en el repo (pesan ~700 MB). Hacen falta los CSV diarios del TP1
@@ -28,6 +28,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/modelo_lgbm.py         # elige grilla y árboles (pliegues 1-2) y reporta (3-4)
 .venv/bin/python src/comparar_modelos.py    # ¿las diferencias entre modelos superan el ruido?
 .venv/bin/python src/interpretar.py         # Etapa B: curvas, SHAP, sesgo restante y techo (figuras/)
+.venv/bin/python src/preparar_dashboard.py  # Etapa C: datos y bandas de confianza del dashboard
+.venv/bin/streamlit run app/dashboard.py    # Etapa C: abre el dashboard en http://localhost:8501
 ```
 
 ## Archivos
@@ -41,6 +43,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/modelo_lgbm.py` — LightGBM con todas las features; compara contra B0, B2 y el modelo interpretable.
 - `src/comparar_modelos.py` — prueba de significancia entre modelos con el día de prueba como unidad.
 - `src/interpretar.py` — Etapa B: figuras de interpretación en `figuras/`.
+- `src/preparar_dashboard.py`, `app/dashboard.py`, `.streamlit/config.toml` — Etapa C: dashboard de confianza del pronóstico.
 - Experimento con vecinos: `--vecinos` en `modelo_interpretable.py`, `modelo_lgbm.py` y `comparar_modelos.py` (salidas `*_exp_vecinos`).
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación, α del sesgo exponencial).
