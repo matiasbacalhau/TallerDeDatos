@@ -77,7 +77,7 @@ Código: `src/features.py` (genera `data/features/<dia>.parquet` y `familias.jso
 
 | Familia | Variables |
 |---|---|
-| base | `temp_pron`, `hum_pron`, `rocio_pron`, `dep_rocio`, `viento_vel`, `viento_sin`, `viento_cos`, `viento_calmo`, `prob_lluvia`, `condicion` (7 grupos), `horizonte`, `hora_solar_sin/cos`, `lat`, `lon` |
+| base | `temp_pron`, `temp_anom` (agregada el 10/11), `elev_solar` y `noche` (agregadas el 10/11), `hum_pron`, `rocio_pron`, `dep_rocio`, `viento_vel`, `viento_sin`, `viento_cos`, `viento_calmo`, `prob_lluvia`, `condicion` (7 grupos), `horizonte`, `hora_solar_sin/cos`, `lat`, `lon` |
 | pendiente | `pendiente_pron` = (pronóstico de T+1 con h+1 − pronóstico de T−1 con h−1) / 2, del **mismo ciclo de emisión** (verificado: 100 % de las filas coinciden en la hora de generación, diferencia ≤ 5 min) |
 | rezagos | `err_ult`, `err_media3`, `err_media6` (mismo horizonte, hasta T−h−2) y `err_ayer` (mismo horario, T−24·k, con 24·k ≥ h+2) |
 | sesgo_ewma | `sesgo_ewma_05/10/20/30`: promedio exponencial (α = 0,05/0,1/0,2/0,3) de la media diaria del error de la estación a esa hora, hasta el día D−k. α se calibra en validación |
@@ -167,3 +167,69 @@ Lecturas:
 - B2 no usa rezagos, así que rinde igual en los dos segmentos (1,393 y 1,377). La persistencia (B3) es la que más se degrada: a 1 h pasa de 1,257 a 1,345.
 - **Límite:** B3 solo se mide donde su rezago existe (las mismas filas para todos), así que el segmento «incompleta» de los baselines subestima el problema: las filas sin rezago no entran. En los modelos sí se evaluarán todas las filas, y ahí se verá cómo manejan los faltantes (LightGBM de forma nativa; el lineal con imputación más una variable indicadora).
 - El segmento «incompleta» es un solo pliegue de 5 días: sirve para describir, no para concluir.
+
+## Etapa A — Modelos (10/11/2026)
+
+### Modelo que prioriza la interpretabilidad
+
+- **Regresión lineal (Ridge) con curvas (splines) en pocas variables.** Cada variable aporta un coeficiente o una curva legible (scikit-learn: `SplineTransformer` + `Ridge`). La penalización es chica y fija (`ridge_alpha = 1`), solo por estabilidad numérica: con ~2 M de filas casi no influye.
+- **Variables, elegidas por criterio meteorológico** (no por búsqueda en los datos):
+
+  | Variable | Forma | Mecanismo |
+  |---|---|---|
+  | Sesgo exponencial por estación × hora (un α) | lineal | Error propio de la estación (altura, entorno, valle, costa) |
+  | `err_ult` × horizonte, `err_media3/6`, `err_ayer` | lineal; `err_ult` con peso que depende del horizonte | Persistencia de la situación del tiempo |
+  | Hora solar | curva periódica | Ciclo diario y transiciones de mañana y tarde |
+  | `pendiente_pron` | curva | *Timing* de frentes y del ciclo diario; desfase de la observación |
+  | `temp_anom` (pronóstico − media de los pronósticos de la estación a esa hora y horizonte en los 7 días previos) | curva | Los pronósticos suavizan los extremos; en valor absoluto la curva aprendería la estación del año |
+  | `dep_rocio` (temperatura − punto de rocío) | curva | Cerca de la saturación la temperatura casi no baja del punto de rocío |
+  | `viento_vel` | curva | Mezcla de la capa cercana al suelo (efecto con umbral) |
+  | Condición y `prob_lluvia` | lineal | Nubosidad y enfriamiento por evaporación |
+  | **Enfriamiento nocturno** = noche × despejado × viento < 10 km/h | indicador | Inversión por radiación que los modelos subestiman |
+
+  - **Noche** = sol bajo el horizonte (elevación < −0,833°), calculada con fecha, hora, latitud y longitud (`elev_solar`, `noche` en `features.py`). **Calma** = viento pronosticado < 10 km/h (≈ 3 m/s, valor usual para que se forme la inversión). **Despejado** = el grupo «despejado». Los umbrales se fijaron por criterio físico y no se ajustaron con los datos.
+  - **Fuera del interpretable** (solo LightGBM): humedad relativa y punto de rocío (los representa `dep_rocio`), dirección del viento (ver «Dirección del viento») y latitud y longitud.
+- **Faltantes:** rezagos, sesgo y anomalía se imputan con 0 y llevan un indicador de faltante. El resto se imputa con la mediana del entrenamiento. Splines, medianas y escalado se ajustan solo con el entrenamiento de cada pliegue.
+- **Único hiperparámetro elegido con datos:** el α del sesgo exponencial, en los pliegues de elección. El conjunto de variables se definió una vez y se corrió una sola vez.
+- **Versión descartada: Elastic Net con todas las variables.** La proporción L1/L2 no cambiaba el error, quedaban 3 de los 4 sesgos exponenciales y humedad y rocío tenían coeficientes grandes de signo opuesto. Exploración en los pliegues de elección: Ridge con todas las variables daba el mismo error que el Elastic Net (1,290 contra 1,286), y la ganancia venía del efecto no lineal de la humedad, que una curva representa de forma directa.
+
+### Modelo que prioriza minimizar el error
+
+- **LightGBM** con todas las familias de features (maneja faltantes de forma nativa).
+
+### Elección de hiperparámetros sin optimismo (los dos modelos)
+
+- **Regla:** los hiperparámetros se eligen en la **primera mitad de los pliegues** y la métrica del informe se reporta en la **segunda mitad**, que no se usó para elegir. Con los 4 pliegues actuales: se elige en los pliegues 1–2 y se reporta en 3–4. Una vez elegidos, los hiperparámetros quedan fijos y el modelo se reentrena en cada pliegue de reporte con todo su entrenamiento.
+- **Criterio de elección:** MAE medio en filas reales con historia completa.
+- **Entrenamiento:** filas reales e interpoladas (decisión 5 del Paso 0), con una submuestra aleatoria fija (semilla de `config.yaml`) para que entre en memoria. La evaluación usa todas las filas reales de prueba.
+- **Consecuencia a tener presente:** con los datos de hoy, el pliegue 4 tiene todos sus días con historia incompleta. La comparación limpia (historia completa) de la segunda mitad queda en un solo pliegue hasta que lleguen más días.
+
+### Resultados del modelo interpretable (10/11/2026)
+
+Código: `src/modelo_interpretable.py` (las piezas comunes a los dos modelos están en `src/modelado.py`). Salidas en `data/resultados/interpretable_*`.
+
+- **Elección (pliegues 1–2, historia completa):** α del sesgo exponencial = **0,2** (MAE 1,237). Las cuatro opciones quedan a menos de 0,003 °C.
+- **Reporte (pliegues 3–4), MAE en °C sobre filas reales, todos contra las mismas filas:**
+
+  | Segmento | Pliegues | B0 NWS | B2 estación×hora | Lineal | 1 h: B2 / lineal | 48 h: B2 / lineal |
+  |---|---|---|---|---|---|---|
+  | completa | 3 | 1,555 | 1,471 | **1,402** | 1,272 / **1,049** | 1,705 / **1,638** |
+  | incompleta | 4 | 1,532 | 1,399 | **1,301** | 1,277 / **1,064** | 1,508 / **1,429** |
+  | todas | 3–4 | 1,544 | 1,435 | **1,351** | 1,275 / **1,057** | 1,606 / **1,533** |
+
+  Con historia completa mejora al NWS crudo un 9,8 % y a B2 un 4,7 %. Con historia incompleta mejora a B2 un 7,0 %. Es mejor que el Elastic Net descartado en los dos segmentos (1,413 y 1,372).
+- **Lo más influyente** (|β| estandarizado): enfriamiento nocturno, sesgo exponencial, pendiente del pronóstico, probabilidad de lluvia, cielo despejado y hora solar.
+- **Enfriamiento nocturno:** en las noches despejadas y calmas (~15 % de las filas) el modelo resta **0,94 °C** (pliegue 3) y **1,09 °C** (pliegue 4) al pronóstico, además del resto de los términos. El signo y el tamaño son estables entre pliegues.
+- **Sesgo exponencial:** 0,22–0,27 °C de corrección por cada °C de sesgo histórico. El resto lo reparten la curva horaria y los demás términos.
+- **Pendiente para la Etapa B:** graficar las curvas (hora solar, `pendiente_pron`, `temp_anom`, `dep_rocio`, `viento_vel` y el peso de `err_ult` según el horizonte) con sus unidades.
+
+### Dirección del viento (10/11/2026)
+
+- **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.
+- **Diagnóstico:** `src/diagnostico_viento.py`, solo en los pliegues de elección. Aprende sobre el entrenamiento un efecto por estación × sector, contraído hacia 0, sobre el residuo de B2, y lo mide en la semana de prueba. Resultados en `data/resultados/diagnostico_viento*.csv`.
+- **Resultado:** fuera de muestra la mejora sobre B2 es como mucho 0,3 % (MAE 1,366 → 1,361). Sin contracción empeora 2,1 %. El efecto global por sector tampoco aporta (+0,1 %). Dentro del entrenamiento las diferencias entre sectores son grandes (mediana 0,54 °C por estación) y se concentran en estaciones de montaña y de costa, pero no se sostienen en la semana siguiente. Con ~23 días, cada estación vio pocos episodios de cada régimen de viento.
+- **Decisión:**
+  - **Modelo interpretable:** sin dirección del viento.
+  - **LightGBM:** recibe dirección (sen/cos), latitud y longitud.
+  - **Volver a evaluar** con más de 60–90 días de datos (mismo script).
+  - **Trabajo futuro:** variables geográficas explícitas (orientación de la costa y relieve de cada estación).

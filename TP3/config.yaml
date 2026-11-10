@@ -20,3 +20,8 @@ calidad:                             # exclusión automática de días (acordado
   alarma_dias_utiles_min: 0.70       # alarma si en los últimos 14 días de calendario hay < 70 % de días usables
   dias_historia: 3                   # un día válido tiene «historia incompleta» si falta o se excluyó alguno de
                                      # los 3 días previos: los rezagos llegan hasta 55 h atrás (h=48, +2 h, media de 6)
+modelos:                             # decisiones del 10/11/2026 (ver DECISIONES.md, Etapa A — Modelos)
+  max_filas_entrenamiento: 2000000   # submuestra aleatoria (semilla) del entrenamiento de cada pliegue
+  interpretable:                     # Ridge con curvas (spline); variables por criterio meteorológico
+    ridge_alpha: 1.0                 # penalización chica y fija, solo por estabilidad numérica
+    umbral_calma_kmh: 10             # enfriamiento nocturno: viento pronosticado < 10 km/h (~3 m/s)

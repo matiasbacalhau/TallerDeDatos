@@ -4,7 +4,8 @@ Todas las variables se calculan con lo que existía AL EMITIR el pronóstico; no
 que "aprender" del entrenamiento, así que se generan una sola vez para todas las filas
 (data/features/<dia>.parquet) y los pliegues solo eligen qué días usar.
 
-  1. Base         pronóstico y sus variables, horizonte, hora solar (sen/cos), ubicación
+  1. Base         pronóstico y sus variables, horizonte, hora solar (sen/cos), ubicación, elevación del
+                  sol y noche (sol bajo el horizonte), anomalía de la temperatura pronosticada
   2. Pendiente    cuánto cambia la temperatura pronosticada alrededor de la hora objetivo
   3. Rezagos      últimos errores conocidos de la misma estación y el mismo horizonte
   4. Sesgo EWMA   promedio exponencial de días del error por estación y hora (tipo NBM)
@@ -33,6 +34,8 @@ CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 ALFAS = CFG["features"]["alfas_ewma"]
 RETRASO = 2                                  # horas de seguridad (ver REGLA DE CAUSALIDAD)
 NH = 48                                      # horizontes 1..48
+DIAS_ANOM, MIN_DIAS_ANOM = 7, 3              # anomalía de temperatura: media de los pronósticos de 7 días previos
+SOL_HORIZONTE = -0.833                       # elevación del sol al salir/ponerse (refracción + radio del disco)
 
 COLS_LECTURA = ["station_id", "state", "latitude", "longitude", "forecast_generated_at_utc", "target_time_utc",
                 "horizon_target_hours", "temperature_forecast_c", "relative_humidity_forecast_pct",
@@ -118,7 +121,44 @@ def tensor_ewma(ERR, t0, alfas):
     return out
 
 
-def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW):
+def elevacion_solar(t_utc, lat, lon):
+    """Elevación del sol (grados) con las fórmulas aproximadas de la NOAA (error < 1° para este uso).
+    No necesita datos externos: fecha y hora UTC, latitud y longitud (oeste negativa)."""
+    t = pd.DatetimeIndex(t_utc)
+    doy = t.day_of_year.to_numpy()
+    hora = t.hour.to_numpy() + t.minute.to_numpy() / 60
+    g = 2 * np.pi / 365 * (doy - 1 + (hora - 12) / 24)
+    eq = 229.18 * (0.000075 + 0.001868 * np.cos(g) - 0.032077 * np.sin(g)
+                   - 0.014615 * np.cos(2 * g) - 0.040849 * np.sin(2 * g))          # ecuación del tiempo (min)
+    dec = (0.006918 - 0.399912 * np.cos(g) + 0.070257 * np.sin(g) - 0.006758 * np.cos(2 * g)
+           + 0.000907 * np.sin(2 * g) - 0.002697 * np.cos(3 * g) + 0.00148 * np.sin(3 * g))  # declinación (rad)
+    tst = hora * 60 + eq + 4 * lon                                               # tiempo solar verdadero (min)
+    ha = np.radians(tst / 4 - 180)                                               # ángulo horario
+    la = np.radians(lat)
+    cz = np.sin(la) * np.sin(dec) + np.cos(la) * np.cos(dec) * np.cos(ha)
+    return 90 - np.degrees(np.arccos(np.clip(cz, -1, 1)))
+
+
+def tensor_media_pron(TEMP, dias=DIAS_ANOM, min_dias=MIN_DIAS_ANOM):
+    """MP[h, s, t] = media de la temperatura pronosticada con el MISMO horizonte para la misma estación y hora,
+    en los `dias` días anteriores (t-24, ..., t-24*dias), con al menos min_dias valores. Esos pronósticos se
+    emitieron en t-24k-h, antes que el de la fila, así que se conocen al emitir."""
+    nT = TEMP.shape[2]
+    suma = np.zeros(TEMP.shape, dtype=np.float64)
+    n = np.zeros(TEMP.shape, dtype=np.int16)
+    for k in range(1, dias + 1):
+        sh = np.full(TEMP.shape, np.nan, dtype=np.float32)
+        sh[:, :, 24 * k:] = TEMP[:, :, :nT - 24 * k]
+        ok = ~np.isnan(sh)
+        suma += np.where(ok, sh, 0)
+        n += ok
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mp = suma / n
+    mp[n < min_dias] = np.nan
+    return mp.astype(np.float32)
+
+
+def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP):
     s = estaciones.get_indexer(d["station_id"].astype(str))
     t = ((d["target_time_utc"] - t0) / pd.Timedelta(hours=1)).astype(int).to_numpy()
     h = d["horizon_target_hours"].to_numpy().astype(int)
@@ -148,6 +188,9 @@ def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW):
     X["hora_solar_cos"] = np.cos(2 * np.pi * hs / 24)
     X["lat"] = d["latitude"].to_numpy()
     X["lon"] = lon
+    elev = elevacion_solar(d["target_time_utc"], d["latitude"].to_numpy(), lon)
+    X["elev_solar"] = elev.astype(np.float32)
+    X["noche"] = elev < SOL_HORIZONTE                   # sol bajo el horizonte (con refracción)
     # ---- 2. pendiente del pronóstico (mismo ciclo de emisión: (T+1, h+1) y (T-1, h-1))
     def tomar(T, hh, tt):
         ok = (hh >= 1) & (hh <= NH) & (tt >= 0) & (tt < nT)
@@ -158,6 +201,8 @@ def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW):
     with np.errstate(invalid="ignore"):
         X["pendiente_pron"] = np.where(~np.isnan(a) & ~np.isnan(b), (a - b) / 2,
                                        np.where(~np.isnan(a), a - f, np.where(~np.isnan(b), f - b, np.nan)))
+    # anomalía: pronóstico menos la media de los pronósticos de la última semana (misma estación, hora y horizonte)
+    X["temp_anom"] = f - tomar(MP, h, t)
     # ---- 3. rezagos (fuente más reciente: T - h - RETRASO; mismo horizonte)
     src = t - h - RETRASO
     X["err_ult"] = tomar(ERR, h, src)
@@ -177,7 +222,8 @@ def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW):
 
 
 FAMILIAS = {
-    "base": ["temp_pron", "hum_pron", "rocio_pron", "dep_rocio", "viento_vel", "viento_sin", "viento_cos",
+    "base": ["temp_pron", "temp_anom", "elev_solar", "noche", "hum_pron", "rocio_pron", "dep_rocio", "viento_vel",
+             "viento_sin", "viento_cos",
              "viento_calmo", "prob_lluvia", "condicion", "horizonte", "hora_solar_sin", "hora_solar_cos", "lat", "lon"],
     "pendiente": ["pendiente_pron"],
     "rezagos": ["err_ult", "err_media3", "err_media6", "err_ayer"],
@@ -192,9 +238,10 @@ def main():
     estaciones, t0, ERR, TEMP = construir_tensores()
     R3, R6 = medias_moviles(ERR, 3, 2), medias_moviles(ERR, 6, 3)
     EW = tensor_ewma(ERR, t0, ALFAS)
+    MP = tensor_media_pron(TEMP)
     for p in sorted((RAIZ / "data" / "pares").glob("*.parquet")):
         d = pd.read_parquet(p, columns=COLS_LECTURA)
-        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW).to_parquet(salida / p.name, index=False)
+        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP).to_parquet(salida / p.name, index=False)
     (salida / "familias.json").write_text(json.dumps(FAMILIAS, indent=1))
     print("listo:", len(list(salida.glob('*.parquet'))), "días")
 

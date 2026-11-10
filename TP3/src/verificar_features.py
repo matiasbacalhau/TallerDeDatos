@@ -9,7 +9,7 @@ import glob
 import numpy as np
 import pandas as pd
 
-from features import ALFAS, RETRASO, k_dias, FAMILIAS
+from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM
 
 RAIZ = Path(__file__).resolve().parents[1]
 H = pd.Timedelta(hours=1)
@@ -30,13 +30,17 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     # (2) recálculo independiente en una muestra de estaciones
     est = rng.choice(F["station_id"].unique(), n_estaciones, replace=False)
     P = pd.concat([pd.read_parquet(p, columns=["station_id", "target_time_utc", "horizon_target_hours",
-                                                "temperature_forecast_c", "error_c", "obs_interpolada"])
+                                                "temperature_forecast_c", "error_c", "obs_interpolada",
+                                                "forecast_generated_at_utc"])
                    for p in sorted((RAIZ / "data/pares").glob("*.parquet"))], ignore_index=True)
     P["station_id"] = P["station_id"].astype(str)
     P = P[P["station_id"].isin(est)]
     real = P[P["error_c"].notna() & ~P["obs_interpolada"]]
     err = real.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["error_c"]
     tmp = P.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["temperature_forecast_c"]
+    gen = P.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["forecast_generated_at_utc"]
+    gen = gen[~gen.index.duplicated()]
+    tmp = tmp[~tmp.index.duplicated()]
     diario = real.assign(dia=real["target_time_utc"].dt.normalize(), hora=real["target_time_utc"].dt.hour) \
                  .groupby(["station_id", "hora", "dia"])["error_c"].mean()
 
@@ -53,7 +57,9 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
         return v
 
     M = F[F["station_id"].isin(est)].sample(n_filas, random_state=semilla)
-    errores = {c: 0 for c in ["err_ult", "err_media3", "err_media6", "err_ayer", "pendiente_pron"] + FAMILIAS["sesgo_ewma"]}
+    errores = {c: 0 for c in ["err_ult", "err_media3", "err_media6", "err_ayer", "pendiente_pron", "temp_anom"]
+               + FAMILIAS["sesgo_ewma"]}
+    anom_posterior = 0
     for _, r in M.iterrows():
         s, T, h = r["station_id"], r["target_time_utc"], int(r["h"])
         fuente = T - (h + RETRASO) * H
@@ -66,6 +72,14 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
         b_ = tmp.get((s, T - H, h - 1), np.nan)
         esperados["pendiente_pron"] = ((a_ - b_) / 2 if not (np.isnan(a_) or np.isnan(b_))
                                        else (a_ - f if not np.isnan(a_) else (f - b_ if not np.isnan(b_) else np.nan)))
+        previos = [tmp.get((s, T - 24 * k * H, h), np.nan) for k in range(1, DIAS_ANOM + 1)]
+        validos = [v for v in previos if not np.isnan(v)]
+        esperados["temp_anom"] = f - np.mean(validos) if len(validos) >= MIN_DIAS_ANOM else np.nan
+        # causalidad de la anomalía: los pronósticos promediados se emitieron antes que el de la fila
+        for k in range(1, DIAS_ANOM + 1):
+            g = gen.get((s, T - 24 * k * H, h), pd.NaT)
+            if not pd.isna(g) and g > r["forecast_generated_at_utc"]:
+                anom_posterior += 1
         dmax = (T - int(k_dias(np.array([h]))[0]) * pd.Timedelta(days=1)).normalize()
         for al in ALFAS:
             esperados[f"sesgo_ewma_{int(round(al * 100)):02d}"] = ewma(s, T.hour, dmax, al)
@@ -76,7 +90,17 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     print(f"recálculo independiente de {n_filas} filas ({n_estaciones} estaciones):")
     for c, n in errores.items():
         print(f"  {c:<16} discrepancias: {n}")
-    assert sum(errores.values()) == 0
+    print(f"  temp_anom con una fuente emitida después de la fila: {anom_posterior}")
+    assert sum(errores.values()) == 0 and anom_posterior == 0
+
+    # (3) noche: control físico de la elevación solar (independiente de la fórmula)
+    hs = (np.degrees(np.arctan2(F["hora_solar_sin"], F["hora_solar_cos"])) / 15) % 24
+    mediodia = F.loc[(hs > 11.5) & (hs < 12.5), "elev_solar"]
+    medianoche = F.loc[(hs < 0.5) | (hs > 23.5), "elev_solar"]
+    horas_noche = F.groupby([F["station_id"], F["target_time_utc"].dt.normalize()])["noche"].mean().mul(24).median()
+    print(f"\nnoche: elevación al mediodía solar mín {mediodia.min():.1f}°, a la medianoche solar máx {medianoche.max():.1f}° "
+          f"| horas de noche por día (mediana): {horas_noche:.1f}")
+    assert mediodia.min() > 0 and medianoche.max() < 0 and 10 < horas_noche < 14
     print("\nfaltantes por variable (% de filas):")
     print((F[sum(FAMILIAS.values(), [])].isna().mean() * 100).round(1).to_string())
     print("\ncondición:", F["condicion"].value_counts(normalize=True).round(3).to_dict())
