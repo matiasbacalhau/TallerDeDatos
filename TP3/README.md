@@ -27,6 +27,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/modelo_interpretable.py # elige el α del sesgo (pliegues 1-2) y reporta (3-4)
 .venv/bin/python src/modelo_lgbm.py         # elige grilla y árboles (pliegues 1-2) y reporta (3-4)
 .venv/bin/python src/comparar_modelos.py    # ¿las diferencias entre modelos superan el ruido?
+.venv/bin/python src/interpretar.py         # Etapa B: curvas, SHAP, sesgo restante y techo (figuras/)
 ```
 
 ## Archivos
@@ -39,6 +40,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/modelado.py`, `src/modelo_interpretable.py` — piezas comunes de los modelos y la regresión lineal con curvas.
 - `src/modelo_lgbm.py` — LightGBM con todas las features; compara contra B0, B2 y el modelo interpretable.
 - `src/comparar_modelos.py` — prueba de significancia entre modelos con el día de prueba como unidad.
+- `src/interpretar.py` — Etapa B: figuras de interpretación en `figuras/`.
 - Experimento con vecinos: `--vecinos` en `modelo_interpretable.py`, `modelo_lgbm.py` y `comparar_modelos.py` (salidas `*_exp_vecinos`).
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación, α del sesgo exponencial).

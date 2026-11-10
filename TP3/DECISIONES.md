@@ -292,10 +292,10 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
   - Con historia completa no aportan nada; LightGBM les da 0,1 % de la ganancia.
   - Ayudan cuando falta la historia propia: faltan en el 14 % de las filas, contra el 35 % de `err_ult`.
   - **Significancia (día como unidad):** LightGBM contra el lineal ahora gana 9 de 10 días (p = 0,01). Pero con historia completa sigue sin ser significativa (p = 0,24, 4 de 5 días). La ventaja está en los días con historia incompleta (p = 0,03, 5 de 5).
-- **Por qué aportan tan poco.** Lo que sabemos al emitir el pronóstico casi no correlaciona con el error de la hora objetivo:
+- **Por qué aportan tan poco.** El último error conocido, solo, deja de servir a las pocas horas, y el de las vecinas repite esa misma información:
   - La correlación entre el error y `err_ult` es de 0,50 a 1 h, pero de solo 0,08 a 6 h. A 24 h y a 48 h vuelve a subir (0,19 y 0,13), porque la fuente queda cerca de la misma hora del día anterior.
   - El error de las vecinas está muy correlacionado con el de la propia estación (0,67–0,78), así que repite información que ya teníamos.
-  - **Conclusión:** la parte predecible del error (sesgo de cada estación por hora y situación del tiempo) ya está captada. Lo que queda depende de cómo evolucione el tiempo después de emitido el pronóstico, y con estos datos no se puede anticipar.
+  - **Conclusión:** las vecinas no suman información nueva sobre la persistencia del error. Lo que sí anticipan los modelos sale de combinar el sesgo de cada estación con la situación del tiempo (ver Etapa B).
 - **Decisión:** no entra al producto. Con historia completa no mejora, y la mejora con historia incompleta (−1,1 % en LightGBM) sale de un solo pliegue. Se vuelve a evaluar con más días (`--vecinos`).
 
 ### Dirección del viento (10/11/2026)
@@ -308,3 +308,35 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
   - **LightGBM:** recibe dirección (sen/cos), latitud y longitud.
   - **Volver a evaluar** con más de 60–90 días de datos (mismo script).
   - **Trabajo futuro:** variables geográficas explícitas (orientación de la costa y relieve de cada estación).
+
+## Etapa B — Interpretación (10/11/2026)
+
+Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `data/resultados/interp_*.csv`. Modelos del producto (sin vecinos), pliegues de reporte 3–4. Las curvas y el SHAP salen del último pliegue, que tiene el entrenamiento más largo. SHAP: contribuciones exactas de LightGBM (TreeSHAP) en 100 000 filas de prueba.
+
+- **Curvas del Ridge** (`interp_curvas_ridge.png`): aporte de cada variable a la corrección, en °C.
+  - **Enfriamiento nocturno:** −1,09 °C en noches despejadas y calmas.
+  - **Pendiente del pronóstico:** casi lineal, de −0,8 a +1,0 °C. Si el pronóstico sube rápido, la observación queda por encima.
+  - **Hora solar:** −0,5 °C a las 15 h y +0,3 °C de noche, además del sesgo exponencial.
+  - **Depresión del rocío:** +0,5 °C cerca de la saturación.
+  - **Viento:** de −0,3 °C en calma a +0,3 °C con viento fuerte.
+  - **Anomalía:** casi plana (±0,1 °C).
+  - **Peso de `err_ult`:** 0,35 °C por °C a 1 h, 0,09 a 6 h y menos de 0,1 después.
+- **SHAP de LightGBM** (`interp_shap_lgbm.png`), |contribución| media en °C: pendiente del pronóstico 0,26, viento 0,21, anomalía 0,15, sesgo exponencial (α 0,3) 0,15 y elevación solar 0,11.
+- **Latitud y longitud** (`interp_latlon.png`): su aporte medio por estación casi no se relaciona con el sesgo histórico de la estación (r = 0,27, 509 estaciones). Los sesgos exponenciales, en cambio, sí (r = 0,80). Lat y lon no funcionan como identificador de la estación: aportan un efecto regional de unos ±0,2 °C.
+- **¿Se captó el sesgo sistemático?** (`interp_sesgo_hora.png`):
+
+  | Corrección | Amplitud del ciclo por hora (°C) | Desvío entre estaciones (°C) | Error medio (°C) |
+  |---|---|---|---|
+  | NWS crudo (B0) | 2,89 | 0,51 | −0,09 |
+  | B2 | 0,70 | 0,38 | −0,05 |
+  | Ridge | 0,53 | 0,36 | −0,07 |
+  | LightGBM | 0,48 | 0,37 | −0,16 |
+
+  - El NWS subestima a las 8 h (+1,3 °C) y sobrestima a las 18 h (−1,6 °C). Los modelos casi eliminan ese ciclo.
+  - El desvío restante entre estaciones incluye el ruido de promediar solo 10 días de prueba, así que no todo es sesgo sin corregir.
+  - **LightGBM** queda algo corrido hacia abajo (−0,16 °C), porque el objetivo L1 apunta a la mediana y no a la media. También deja un pico de −0,5 °C a las 18 h.
+- **Cuánto del error se anticipa** (`interp_techo.png`), como correlación entre la corrección y el error del NWS:
+  - **Modelos:** 0,60–0,63 a 1 h, ~0,50–0,54 a 6–12 h y 0,39–0,41 a 48 h. Explican entre el 15 % y el 40 % de la varianza del error.
+  - **`err_ult` solo:** cae a ~0 en 6 h y oscila con el ciclo diario. Es positivo cuando la fuente cae cerca de la misma hora del día anterior (h ≈ 22) y negativo cuando cae en la fase opuesta.
+- **Pendiente para el informe:** elegir qué figuras van y redactarlas.
+
