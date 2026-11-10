@@ -11,7 +11,7 @@ Regla (DECISIONES.md, Etapa A — Modelos):
   2. Con eso fijo se reentrena en cada pliegue de la segunda mitad y se reporta contra B0, B2 y el
      modelo interpretable (si ya se corrió: se lee de data/resultados/interpretable_por_pliegue.csv).
 
-Uso:  .venv/bin/python src/modelo_lgbm.py
+Uso:  .venv/bin/python src/modelo_lgbm.py [--vecinos]   (--vecinos: experimento con la familia 5, no es el producto)
 """
 import itertools
 import json
@@ -21,12 +21,12 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from modelado import CFG, RAIZ, SEMILLA, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, EXP_VECINOS, RAIZ, SEMILLA, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
 from modelo_interpretable import CONDICIONES
 
 P = CFG["modelos"]["lgbm"]
 FAMILIAS = json.loads((RAIZ / "data" / "features" / "familias.json").read_text())
-X_COLS = [c for cols in FAMILIAS.values() for c in cols]
+X_COLS = [c for fam, cols in FAMILIAS.items() if fam != "vecinos" or EXP_VECINOS for c in cols]
 COLUMNAS = ["station_id", "target_time_utc", "error_c", "obs_interpolada"] + X_COLS
 GRILLA = [dict(num_leaves=h, objective=o) for h, o in itertools.product(P["num_leaves"], P["objetivos"])]
 CORTES = list(range(P["paso_arboles"], P["max_arboles"] + 1, P["paso_arboles"]))
@@ -76,7 +76,7 @@ def main():
             print(f"pliegue {k} · {nombre(params)}: {time.time() - t0:.0f} s", flush=True)
         del A, T, XT
     G = pd.DataFrame(grilla)
-    G.to_csv(salida / "lgbm_eleccion.csv", index=False)
+    G.to_csv(salida / f"lgbm_eleccion{SUFIJO}.csv", index=False)
     crit = G[G.segmento == "completa"].groupby(["config", "arboles"])["MAE"].mean().sort_values()
     print("\nMAE medio (historia completa) en los pliegues de elección, 10 mejores:")
     print(crit.head(10).round(4).to_string())
@@ -93,17 +93,17 @@ def main():
         m = entrenar(A, params, n_arb)
         filas += evaluar(T, {"lgbm": m.predict(matriz(T))}, k)
         imp.append(pd.Series(m.feature_importance("gain"), index=m.feature_name(), name=f"pliegue_{k}"))
-        m.save_model(str(salida / f"lgbm_pliegue_{k}.txt"))
+        m.save_model(str(salida / f"lgbm_pliegue_{k}{SUFIJO}.txt"))
         print(f"pliegue {k}: {len(A):,} entrenamiento | {len(T):,} prueba | {time.time() - t0:.0f} s", flush=True)
         del A, T
     R = pd.DataFrame(filas)
-    R.to_csv(salida / "lgbm_por_pliegue.csv", index=False)
+    R.to_csv(salida / f"lgbm_por_pliegue{SUFIJO}.csv", index=False)
     I = pd.concat(imp, axis=1)
     I = I / I.sum()                                         # fracción de la ganancia total por pliegue
-    I.to_csv(salida / "lgbm_importancia.csv")
-    (salida / "lgbm_hiperparametros.json").write_text(json.dumps({**P, **params, "arboles": int(n_arb)}))
+    I.to_csv(salida / f"lgbm_importancia{SUFIJO}.csv")
+    (salida / f"lgbm_hiperparametros{SUFIJO}.json").write_text(json.dumps({**P, **params, "arboles": int(n_arb)}))
 
-    lin = salida / "interpretable_por_pliegue.csv"
+    lin = salida / f"interpretable_por_pliegue{SUFIJO}.csv"
     if lin.exists():
         L = pd.read_csv(lin)
         L = L[L.modelo == "lineal"].astype({"horizonte": str})

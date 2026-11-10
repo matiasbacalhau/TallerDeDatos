@@ -12,6 +12,9 @@ validacion:                          # walk-forward (decisión del grupo, 2/11/2
   dias_min_entrenamiento: 10
 features:                            # decisiones del 2/11/2026: familias 1-4
   alfas_ewma: [0.05, 0.1, 0.2, 0.3]  # memoria del sesgo exponencial; se calibra en validación
+  vecinos:                           # familia 5 (10/11/2026): errores recientes de estaciones cercanas
+    k: 5
+    max_km: 100
 calidad:                             # exclusión automática de días (acordado 10/11/2026, ver src/calidad_dias.py)
   max_exceso_pp: 10                  # se excluye si % sin observación > mediana de referencia + 10 pp
   ventana_dias: 14                   # días válidos anteriores que forman la referencia

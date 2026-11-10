@@ -22,10 +22,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/calidad_dias.py       # excluye días con faltantes anómalos y deja el registro
 .venv/bin/python src/validacion.py         # muestra los pliegues walk-forward
 .venv/bin/python src/baselines.py          # baselines B0-B3 en los pliegues
-.venv/bin/python src/features.py           # variables (familias 1-4) por día
+.venv/bin/python src/features.py           # variables por día (familias 1-4; la 5, vecinos, es experimental)
 .venv/bin/python src/verificar_features.py # controles de causalidad y recálculo independiente
 .venv/bin/python src/modelo_interpretable.py # elige el α del sesgo (pliegues 1-2) y reporta (3-4)
 .venv/bin/python src/modelo_lgbm.py         # elige grilla y árboles (pliegues 1-2) y reporta (3-4)
+.venv/bin/python src/comparar_modelos.py    # ¿las diferencias entre modelos superan el ruido?
 ```
 
 ## Archivos
@@ -37,5 +38,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/features.py`, `src/verificar_features.py` — variables conocidas al emitir el pronóstico y su control.
 - `src/modelado.py`, `src/modelo_interpretable.py` — piezas comunes de los modelos y la regresión lineal con curvas.
 - `src/modelo_lgbm.py` — LightGBM con todas las features; compara contra B0, B2 y el modelo interpretable.
+- `src/comparar_modelos.py` — prueba de significancia entre modelos con el día de prueba como unidad.
+- Experimento con vecinos: `--vecinos` en `modelo_interpretable.py`, `modelo_lgbm.py` y `comparar_modelos.py` (salidas `*_exp_vecinos`).
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación, α del sesgo exponencial).

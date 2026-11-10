@@ -9,6 +9,8 @@ que "aprender" del entrenamiento, así que se generan una sola vez para todas la
   2. Pendiente    cuánto cambia la temperatura pronosticada alrededor de la hora objetivo
   3. Rezagos      últimos errores conocidos de la misma estación y el mismo horizonte
   4. Sesgo EWMA   promedio exponencial de días del error por estación y hora (tipo NBM)
+  5. Vecinos      últimos errores conocidos de las K estaciones más cercanas (dentro de max_km). EXPERIMENTO:
+                  se calcula y se verifica, pero los modelos del producto no la usan (solo con --vecinos)
 
 DÍAS EXCLUIDOS POR CALIDAD (src/calidad_dias.py): las features se calculan para todos los días. Las
 observaciones REALES de un día excluido pueden servir de rezago a días posteriores (son correctas,
@@ -36,6 +38,7 @@ RETRASO = 2                                  # horas de seguridad (ver REGLA DE 
 NH = 48                                      # horizontes 1..48
 DIAS_ANOM, MIN_DIAS_ANOM = 7, 3              # anomalía de temperatura: media de los pronósticos de 7 días previos
 SOL_HORIZONTE = -0.833                       # elevación del sol al salir/ponerse (refracción + radio del disco)
+VEC = CFG["features"]["vecinos"]
 
 COLS_LECTURA = ["station_id", "state", "latitude", "longitude", "forecast_generated_at_utc", "target_time_utc",
                 "horizon_target_hours", "temperature_forecast_c", "relative_humidity_forecast_pct",
@@ -158,7 +161,39 @@ def tensor_media_pron(TEMP, dias=DIAS_ANOM, min_dias=MIN_DIAS_ANOM):
     return mp.astype(np.float32)
 
 
-def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP):
+def vecinos(estaciones, k=VEC["k"], max_km=VEC["max_km"]):
+    """Para cada estación, índices de sus k vecinas más cercanas a menos de max_km (-1 = no hay)."""
+    c = pd.concat([pd.read_parquet(f, columns=["station_id", "latitude", "longitude"]).drop_duplicates("station_id")
+                   for f in sorted(glob.glob(str(RAIZ / "data/pares/*.parquet")))])
+    c = c.assign(station_id=c["station_id"].astype(str)).drop_duplicates("station_id").set_index("station_id")
+    c = c.reindex(estaciones)
+    la, lo = np.radians(c["latitude"].to_numpy()), np.radians(c["longitude"].to_numpy())
+    a = (np.sin((la[:, None] - la[None]) / 2) ** 2
+         + np.cos(la[:, None]) * np.cos(la[None]) * np.sin((lo[:, None] - lo[None]) / 2) ** 2)
+    dist = 2 * 6371 * np.arcsin(np.sqrt(a))
+    np.fill_diagonal(dist, np.inf)
+    dist[np.isnan(dist)] = np.inf
+    idx = np.argsort(dist, axis=1)[:, :k]
+    idx[np.take_along_axis(dist, idx, axis=1) > max_km] = -1
+    return idx
+
+
+def tensor_vecinos(ERR, V):
+    """NV[h, s, t] = media de ERR[h, v, t] sobre las vecinas v de s que tienen dato (NaN si ninguna)."""
+    suma = np.zeros(ERR.shape, dtype=np.float32)
+    n = np.zeros(ERR.shape, dtype=np.int8)
+    for j in range(V.shape[1]):
+        v = V[:, j]
+        x = np.full(ERR.shape, np.nan, dtype=np.float32)
+        x[:, v >= 0] = ERR[:, v[v >= 0]]
+        ok = ~np.isnan(x)
+        suma += np.where(ok, x, 0)
+        n += ok
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(n > 0, suma / n, np.nan).astype(np.float32)
+
+
+def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV):
     s = estaciones.get_indexer(d["station_id"].astype(str))
     t = ((d["target_time_utc"] - t0) / pd.Timedelta(hours=1)).astype(int).to_numpy()
     h = d["horizon_target_hours"].to_numpy().astype(int)
@@ -218,6 +253,9 @@ def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP):
         ok = Dsrc >= 0
         v[ok] = S[s[ok], u[ok], Dsrc[ok]]
         X[f"sesgo_ewma_{int(round(a_ * 100)):02d}"] = v
+    # ---- 5. vecinos (misma fuente que los rezagos: T - h - RETRASO)
+    X["vec_err_ult"] = tomar(NV, h, src)                       # mismo horizonte que la fila
+    X["vec_err_1h"] = tomar(NV, np.ones_like(h), src)          # pronóstico a 1 h: lo más reciente de la zona
     return X
 
 
@@ -228,6 +266,7 @@ FAMILIAS = {
     "pendiente": ["pendiente_pron"],
     "rezagos": ["err_ult", "err_media3", "err_media6", "err_ayer"],
     "sesgo_ewma": [f"sesgo_ewma_{int(round(a * 100)):02d}" for a in ALFAS],
+    "vecinos": ["vec_err_ult", "vec_err_1h"],
 }
 
 
@@ -239,9 +278,12 @@ def main():
     R3, R6 = medias_moviles(ERR, 3, 2), medias_moviles(ERR, 6, 3)
     EW = tensor_ewma(ERR, t0, ALFAS)
     MP = tensor_media_pron(TEMP)
+    V = vecinos(estaciones)
+    print(f"vecinos: {(V >= 0).sum(1).mean():.1f} por estación en promedio, {int((V[:, 0] < 0).sum())} estaciones sin ninguna")
+    NV = tensor_vecinos(ERR, V)
     for p in sorted((RAIZ / "data" / "pares").glob("*.parquet")):
         d = pd.read_parquet(p, columns=COLS_LECTURA)
-        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP).to_parquet(salida / p.name, index=False)
+        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV).to_parquet(salida / p.name, index=False)
     (salida / "familias.json").write_text(json.dumps(FAMILIAS, indent=1))
     print("listo:", len(list(salida.glob('*.parquet'))), "días")
 

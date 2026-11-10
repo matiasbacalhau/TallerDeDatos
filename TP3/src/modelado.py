@@ -4,6 +4,7 @@ para elegir y para reportar, y evaluación por segmento contra los baselines.
 Regla de elección (DECISIONES.md, Etapa A — Modelos): los hiperparámetros se eligen en la primera
 mitad de los pliegues y la métrica del informe se reporta en la segunda mitad.
 """
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,10 @@ CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 FEAT_DIR = RAIZ / "data" / "features"
 SEMILLA = CFG["semilla"]
 HORIZONTES_REPORTE = (1, 3, 6, 12, 24, 48)
+# Experimento (no es parte del producto): con --vecinos los modelos suman la familia 5 de features.py y
+# sus salidas llevan el sufijo _exp_vecinos, sin pisar las del producto. Ver DECISIONES.md, «Familia 5».
+EXP_VECINOS = "--vecinos" in sys.argv
+SUFIJO = "_exp_vecinos" if EXP_VECINOS else ""
 
 
 def pliegues_eleccion_reporte():

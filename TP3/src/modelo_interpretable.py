@@ -1,7 +1,8 @@
 """Modelo que prioriza la interpretabilidad: regresión lineal (Ridge) con curvas en pocas variables.
 
   corrección = b0 + Σ β·x (variables lineales) + f(hora solar) + f(pendiente_pron) + f(temp_anom)
-               + f(dep_rocio) + f(viento_vel) + err_ult · g(horizonte) + γ · enfriamiento_nocturno
+               + f(dep_rocio) + f(viento_vel) + err_ult · g(horizonte) + vec_err_1h · g'(horizonte)
+               + γ · enfriamiento_nocturno
 
 Cada f y g es una combinación de bases spline, así que se lee como una curva. La hora solar usa un spline
 periódico (las 23 h y las 0 h son vecinas).
@@ -10,6 +11,8 @@ Variables elegidas por criterio meteorológico (DECISIONES.md, Etapa A — Model
   - sesgo exponencial por estación × hora (UN solo α, elegido en los pliegues de elección): error propio de
     la estación (altura, entorno, valle, costa).
   - rezagos: persistencia de la situación; el último error pesa según la antelación -> err_ult · g(horizonte).
+  - vecinos (solo en el experimento --vecinos; no está en el producto): error reciente de las estaciones
+    cercanas. El error a 1 h de la zona pesa según la antelación -> vec_err_1h · g'(horizonte).
   - hora solar: ciclo diario y transiciones de la mañana y la tarde.
   - pendiente del pronóstico: errores de timing de frentes y del ciclo diario, desfase de la observación.
   - anomalía de la temperatura pronosticada: los pronósticos suavizan los extremos (en valor absoluto la
@@ -27,7 +30,7 @@ Pasos:
   2. Con ese α fijo se reentrena y se evalúa en la segunda mitad, contra B0 y B2, por segmento.
   3. Se guardan los coeficientes por pliegue.
 
-Uso:  .venv/bin/python src/modelo_interpretable.py
+Uso:  .venv/bin/python src/modelo_interpretable.py [--vecinos]
 """
 import json
 import time
@@ -37,12 +40,13 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import SplineTransformer, StandardScaler
 
-from modelado import CFG, RAIZ, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, EXP_VECINOS, RAIZ, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
 
 P = CFG["modelos"]["interpretable"]
 LINEALES = ["prob_lluvia", "horizonte"]
 CURVAS = ["pendiente_pron", "temp_anom", "dep_rocio", "viento_vel"]
-REZAGOS = ["err_ult", "err_media3", "err_media6", "err_ayer"]
+REZAGOS = ["err_ult", "err_media3", "err_media6", "err_ayer"] + (["vec_err_ult", "vec_err_1h"] if EXP_VECINOS else [])
+POR_HORIZONTE = ["err_ult"] + (["vec_err_1h"] if EXP_VECINOS else [])   # su peso depende de la antelación
 CONDICIONES = ["despejado", "parcial", "nublado", "lluvia", "tormenta", "niebla", "nieve", "otro"]
 SESGOS = [f"sesgo_ewma_{int(round(a * 100)):02d}" for a in CFG["features"]["alfas_ewma"]]
 COLUMNAS = (["station_id", "target_time_utc", "error_c", "obs_interpolada", "hora_solar_sin", "hora_solar_cos",
@@ -109,8 +113,9 @@ class Disenio:
             S = sp.transform(pd.DataFrame(v, columns=[c]))
             agregar(S, [f"{c}_s{i}" for i in range(S.shape[1])])
         G = self.sp_h.transform(df[["horizonte"]])
-        e = np.nan_to_num(df["err_ult"].to_numpy(dtype=np.float64))
-        agregar(G * e[:, None], [f"err_ult_x_h_s{i}" for i in range(G.shape[1])])
+        for c in POR_HORIZONTE:
+            e = np.nan_to_num(df[c].to_numpy(dtype=np.float64))
+            agregar(G * e[:, None], [f"{c}_x_h_s{i}" for i in range(G.shape[1])])
         return np.hstack(bloques), nombres
 
 
@@ -139,7 +144,7 @@ def main():
                     grilla.append({**f, "sesgo": sesgo})
         print(f"pliegue {k}: {len(A):,} filas de entrenamiento | {len(T):,} de prueba | {time.time() - t0:.0f} s")
     G = pd.DataFrame(grilla)
-    G.to_csv(salida / "interpretable_eleccion.csv", index=False)
+    G.to_csv(salida / f"interpretable_eleccion{SUFIJO}.csv", index=False)
     crit = G[G.segmento == "completa"].groupby("sesgo")["MAE"].mean().sort_values()
     print("\nMAE medio (historia completa) en los pliegues de elección:")
     print(crit.round(4).to_string())
@@ -155,10 +160,10 @@ def main():
         filas += evaluar(T, {"lineal": m.predict(dis.transform(T))}, k)
         coefs.append(pd.Series(m.coef_, index=dis.nombres, name=f"pliegue_{k}"))
     R = pd.DataFrame(filas)
-    R.to_csv(salida / "interpretable_por_pliegue.csv", index=False)
+    R.to_csv(salida / f"interpretable_por_pliegue{SUFIJO}.csv", index=False)
     C = pd.concat(coefs, axis=1)
-    C.to_csv(salida / "interpretable_coeficientes.csv")
-    (salida / "interpretable_hiperparametros.json").write_text(json.dumps({"sesgo": sesgo, **P}))
+    C.to_csv(salida / f"interpretable_coeficientes{SUFIJO}.csv")
+    (salida / f"interpretable_hiperparametros{SUFIJO}.json").write_text(json.dumps({"sesgo": sesgo, **P}))
 
     pd.set_option("display.width", 200)
     for seg in ("completa", "incompleta", "todas"):

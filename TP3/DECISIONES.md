@@ -248,6 +248,56 @@ Código: `src/modelo_lgbm.py`. Salidas en `data/resultados/lgbm_*`, con los mode
   - **Sesgo del pliegue 3:** sigue en −0,30 °C, igual que B2. Ninguno de los dos corrige el cambio de régimen de esa semana.
 - **Importancia** (fracción de la ganancia): pendiente del pronóstico 0,13, sesgos exponenciales 0,21 en conjunto, hora solar 0,10, latitud y longitud 0,10 en conjunto, `err_ult` 0,01.
 
+### ¿Las diferencias entre modelos son reales? (10/11/2026)
+
+Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.csv`.
+
+- **Unidad de la prueba: el día de prueba,** no la fila. Dentro de un día los errores de estaciones y horizontes están muy correlacionados, así que contar filas daría p-valores falsamente chicos.
+- **Prueba:** t pareado sobre la diferencia de MAE diario (Diebold–Mariano con pérdida absoluta), un intervalo bootstrap remuestreando días y la cantidad de días que gana cada modelo. Son 10 días de los pliegues 3–4. Con tan pocos días el bootstrap es optimista: manda el t.
+- **Resultados** (diferencia de MAE en °C; negativo = A mejor):
+
+  | A contra B | Todas (10 días) | Historia completa (5 días) |
+  |---|---|---|
+  | Lineal − B2 | −0,082 · p = 0,002 · gana 10/10 | −0,068 · p = 0,02 · gana 5/5 |
+  | LightGBM − B2 | −0,110 · p = 0,002 · gana 10/10 | −0,088 · p = 0,01 · gana 5/5 |
+  | LightGBM − lineal | −0,027 · p = 0,06 · gana 7/10 | −0,020 · p = 0,29 · gana 3/5 |
+
+- **Conclusión (producto, sin vecinos; el experimento con vecinos está en su sección):**
+  - Los dos modelos mejoran a B2 de forma consistente.
+  - La ventaja de LightGBM sobre el lineal **no es significativa** con los datos actuales. Casi un tercio de esa ventaja sale de un solo día, el 21/10, que está rodeado de días excluidos (0,11 °C ese día).
+  - Se vuelve a medir cuando haya más días.
+
+### Experimento: errores de las estaciones vecinas (familia 5, 10/11/2026)
+
+- **Estado: experimento, no forma parte del producto.** Regla acordada: si una variable no mejora el modelo de forma demostrable, no entra al producto y queda registrada como experimento. `features.py` calcula y verifica la familia, pero los modelos solo la usan con `--vecinos`. Esa corrida guarda sus salidas con el sufijo `_exp_vecinos`.
+
+- **Motivo:** el error del pronóstico tiene correlación espacial: la misma situación del tiempo afecta a toda la zona. Se buscó información nueva porque la grilla plana de LightGBM indicaba que el límite no está en el algoritmo.
+- **Variables** (`features.py`, configuradas en `config.yaml` → `features.vecinos`):
+  - **Vecinas:** las 5 estaciones más cercanas dentro de 100 km. En promedio cada estación tiene 4,6, y ninguna queda sin vecinas.
+  - `vec_err_ult`: media del último error de las vecinas con el mismo horizonte.
+  - `vec_err_1h`: media del error del pronóstico a 1 h de las vecinas en la misma hora fuente.
+  - **Causalidad:** las dos usan la misma fuente que los rezagos (objetivo − h − 2 h). `verificar_features.py` las recalcula con otro método (BallTree) y da 0 discrepancias.
+- **En los modelos:**
+  - **Ridge:** las dos van como lineales, con 0 más un indicador cuando faltan. `vec_err_1h` lleva además un peso que depende del horizonte, igual que `err_ult`.
+  - **LightGBM:** las recibe con el resto de las familias.
+  - Los dos volvieron a elegir sus hiperparámetros en los pliegues 1–2. El Ridge mantuvo α = 0,2. LightGBM pasó a 127 hojas, L2 y 100 árboles, aunque la curva sigue plana: hay 9 configuraciones a menos de 0,004 °C.
+- **Resultado (pliegues 3–4, MAE en °C):**
+
+  | Segmento | Lineal sin → con vecinos | LightGBM sin → con vecinos |
+  |---|---|---|
+  | completa | 1,402 → 1,401 | 1,382 → 1,381 |
+  | incompleta | 1,301 → 1,301 | 1,267 → **1,253** |
+  | todas | 1,351 → 1,351 | 1,325 → 1,317 |
+
+  - Con historia completa no aportan nada; LightGBM les da 0,1 % de la ganancia.
+  - Ayudan cuando falta la historia propia: faltan en el 14 % de las filas, contra el 35 % de `err_ult`.
+  - **Significancia (día como unidad):** LightGBM contra el lineal ahora gana 9 de 10 días (p = 0,01). Pero con historia completa sigue sin ser significativa (p = 0,24, 4 de 5 días). La ventaja está en los días con historia incompleta (p = 0,03, 5 de 5).
+- **Por qué aportan tan poco.** Lo que sabemos al emitir el pronóstico casi no correlaciona con el error de la hora objetivo:
+  - La correlación entre el error y `err_ult` es de 0,50 a 1 h, pero de solo 0,08 a 6 h. A 24 h y a 48 h vuelve a subir (0,19 y 0,13), porque la fuente queda cerca de la misma hora del día anterior.
+  - El error de las vecinas está muy correlacionado con el de la propia estación (0,67–0,78), así que repite información que ya teníamos.
+  - **Conclusión:** la parte predecible del error (sesgo de cada estación por hora y situación del tiempo) ya está captada. Lo que queda depende de cómo evolucione el tiempo después de emitido el pronóstico, y con estos datos no se puede anticipar.
+- **Decisión:** no entra al producto. Con historia completa no mejora, y la mejora con historia incompleta (−1,1 % en LightGBM) sale de un solo pliegue. Se vuelve a evaluar con más días (`--vecinos`).
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.

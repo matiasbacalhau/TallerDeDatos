@@ -9,7 +9,9 @@ import glob
 import numpy as np
 import pandas as pd
 
-from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM
+from sklearn.neighbors import BallTree
+
+from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM, VEC
 
 RAIZ = Path(__file__).resolve().parents[1]
 H = pd.Timedelta(hours=1)
@@ -31,10 +33,16 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     est = rng.choice(F["station_id"].unique(), n_estaciones, replace=False)
     P = pd.concat([pd.read_parquet(p, columns=["station_id", "target_time_utc", "horizon_target_hours",
                                                 "temperature_forecast_c", "error_c", "obs_interpolada",
-                                                "forecast_generated_at_utc"])
+                                                "forecast_generated_at_utc", "latitude", "longitude"])
                    for p in sorted((RAIZ / "data/pares").glob("*.parquet"))], ignore_index=True)
     P["station_id"] = P["station_id"].astype(str)
-    P = P[P["station_id"].isin(est)]
+    # vecinas con otro método (BallTree con distancia haversine) para el control de la familia 5
+    coord = P.drop_duplicates("station_id").set_index("station_id")[["latitude", "longitude"]]
+    arbol = BallTree(np.radians(coord.to_numpy()), metric="haversine")
+    dist, ind = arbol.query(np.radians(coord.loc[est].to_numpy()), k=VEC["k"] + 1)
+    vecinas = {s: [coord.index[i] for d, i in zip(dist[j][1:], ind[j][1:]) if d * 6371 <= VEC["max_km"]]
+               for j, s in enumerate(est)}
+    P = P[P["station_id"].isin(set(est) | {v for vs in vecinas.values() for v in vs})]
     real = P[P["error_c"].notna() & ~P["obs_interpolada"]]
     err = real.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["error_c"]
     tmp = P.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["temperature_forecast_c"]
@@ -58,7 +66,7 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
 
     M = F[F["station_id"].isin(est)].sample(n_filas, random_state=semilla)
     errores = {c: 0 for c in ["err_ult", "err_media3", "err_media6", "err_ayer", "pendiente_pron", "temp_anom"]
-               + FAMILIAS["sesgo_ewma"]}
+               + FAMILIAS["sesgo_ewma"] + FAMILIAS["vecinos"]}
     anom_posterior = 0
     for _, r in M.iterrows():
         s, T, h = r["station_id"], r["target_time_utc"], int(r["h"])
@@ -67,6 +75,9 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
                      "err_media3": np.nanmean([e(s, fuente - j * H, h) for j in range(3)]) if sum(~np.isnan([e(s, fuente - j * H, h) for j in range(3)])) >= 2 else np.nan,
                      "err_media6": np.nanmean([e(s, fuente - j * H, h) for j in range(6)]) if sum(~np.isnan([e(s, fuente - j * H, h) for j in range(6)])) >= 3 else np.nan,
                      "err_ayer": e(s, T - 24 * int(k_dias(np.array([h]))[0]) * H, h)}
+        for c, hv in (("vec_err_ult", h), ("vec_err_1h", 1)):
+            vals = [e(v, fuente, hv) for v in vecinas[s]]
+            esperados[c] = np.nanmean(vals) if np.any(~np.isnan(vals)) else np.nan
         f = r["temp_pron"]
         a_ = tmp.get((s, T + H, h + 1), np.nan)
         b_ = tmp.get((s, T - H, h - 1), np.nan)
