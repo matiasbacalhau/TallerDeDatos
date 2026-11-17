@@ -1,0 +1,9 @@
+familia,en_el_ridge_final
+base,True
+pendiente,True
+rezagos,True
+sesgo_ewma,True
+vecinos,False
+revision,True
+rezagos_extra,False
+dinamica,False
