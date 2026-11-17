@@ -6,10 +6,15 @@ interpolacion:
   max_horas_hueco: 3                 # se interpola solo si el hueco dura <= 3 h
 semilla: 42
 validacion:                          # walk-forward (decisión del grupo, 2/11/2026)
-  n_pliegues: 4                      # con >60 días de datos: subir a 5-6
-  dias_prueba: 5                     # días de cada bloque de prueba (subir a 7 con más datos)
+  ancla_pruebas: 2026-09-30          # pliegues anclados (17/11/2026): el primer bloque de prueba empieza acá
+  n_pliegues_eleccion: 2             # los primeros pliegues eligen hiperparámetros una sola vez; el resto reporta
+  dias_prueba: 5                     # días usables de cada bloque de prueba
   gap_dias: 2                        # días descartados entre entrenamiento y prueba
   dias_min_entrenamiento: 10
+experimentos:                        # experimentación por familias (17/11/2026, ver DECISIONES.md)
+  fecha_corte: 2026-11-09            # datos congelados: los días posteriores no reabren los experimentos
+  umbral_promedio_c: 0.005           # se saca una familia si sin ella el MAE medio de elección no empeora más que esto
+  umbral_pliegue_c: 0.010            # ... y en ningún pliegue de elección empeora más que esto
 features:                            # decisiones del 2/11/2026: familias 1-4
   alfas_ewma: [0.05, 0.1, 0.2, 0.3]  # memoria del sesgo exponencial; se calibra en validación
   vecinos:                           # familia 5 (10/11/2026): errores recientes de estaciones cercanas

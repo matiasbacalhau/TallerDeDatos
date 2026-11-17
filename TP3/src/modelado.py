@@ -32,12 +32,13 @@ SUFIJO = "_exp_todas" if EXP_TODAS else (("_exp_vecinos" if EXP_VECINOS else "")
                                          + ("_exp_rezagos" if EXP_REZAGOS else "") + ("_exp_dinamica" if EXP_DINAMICA else ""))
 
 
-def pliegues_eleccion_reporte():
-    """(pliegues para elegir hiperparámetros, pliegues para reportar)."""
-    pl = pliegues_walk_forward(dias_disponibles())
+def pliegues_eleccion_reporte(hasta=None):
+    """(pliegues que eligen hiperparámetros, pliegues que reportan), numerados desde 1. Con `hasta` se usan
+    solo los días hasta esa fecha (corte congelado de los experimentos)."""
+    pl = pliegues_walk_forward(dias_disponibles(), hasta=hasta)
     verificar(pl, CFG_VAL["gap_dias"])
-    mitad = len(pl) // 2
-    return list(enumerate(pl[:mitad], 1)), list(enumerate(pl[mitad:], mitad + 1))
+    ne = CFG_VAL["n_pliegues_eleccion"]
+    return list(enumerate(pl[:ne], 1)), list(enumerate(pl[ne:], ne + 1))
 
 
 def _archivo(dia):
