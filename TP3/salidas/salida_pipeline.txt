@@ -5,20 +5,28 @@ PASO 1 de 6 · Preparar los datos   (preparar_datos.py)
 Lee los CSV diarios (pronóstico del NWS + temperatura observada), une cada pronóstico con lo que
 realmente se midió y calcula el error de temperatura: error = observado − pronosticado, en °C.
 
-Archivos de entrada: 47 días, del 10/09/2026 al 29/10/2026.
-AVISO: no hay archivo para 3 días del período: 15/10, 27/10, 28/10. Esos días quedan fuera del análisis.
-Días leídos en esta corrida: 0 (los demás ya estaban procesados de corridas anteriores).
+Archivos de entrada: 55 días, del 10/09/2026 al 09/11/2026.
+AVISO: no hay archivo para 6 días del período: 15/10, 27/10, 28/10, 30/10, 31/10, 01/11. Esos días quedan fuera del análisis.
+  día nuevo 02/11/2026: 593.011 filas
+  día nuevo 03/11/2026: 594.004 filas
+  día nuevo 04/11/2026: 593.422 filas
+  día nuevo 05/11/2026: 592.360 filas
+  día nuevo 06/11/2026: 593.998 filas
+  día nuevo 07/11/2026: 594.036 filas
+  día nuevo 08/11/2026: 593.965 filas
+  día nuevo 09/11/2026: 591.426 filas
+Días leídos en esta corrida: 8 (los demás ya estaban procesados de corridas anteriores).
 
-Temperatura observada: una lectura por estación y hora (519 estaciones × 1.199 horas = 622.281 lecturas posibles)
-  con lectura real del NWS:        401.358  (64,5 %)
-  completadas por interpolación:    62.793  (10,1 %)  huecos de hasta 3 h entre dos lecturas reales
-  sin dato:                        158.130  (25,4 %)  huecos más largos: esas horas quedan sin error
+Temperatura observada: una lectura por estación y hora (519 estaciones × 1.463 horas = 759.297 lecturas posibles)
+  con lectura real del NWS:        471.800  (62,1 %)
+  completadas por interpolación:    83.491  (11,0 %)  huecos de hasta 3 h entre dos lecturas reales
+  sin dato:                        204.006  (26,9 %)  huecos más largos: esas horas quedan sin error
   lecturas repetidas entre archivos de días distintos: 0
 
-Tabla pronóstico-observación (una fila por estación × hora objetivo × horizonte de 1 a 48 h): 27.818.020 filas.
-Días recalculados en esta corrida: 0 (solo los nuevos o aquellos cuya observación cambió).
+Tabla pronóstico-observación (una fila por estación × hora objetivo × horizonte de 1 a 48 h): 32.564.242 filas.
+Días recalculados en esta corrida: 9 (solo los nuevos o aquellos cuya observación cambió).
 
-(paso 1 terminado en 2 s)
+(paso 1 terminado en 11 s)
 
 ====================================================================================================
 PASO 2 de 6 · Control de calidad por día   (calidad_dias.py)
@@ -26,7 +34,7 @@ PASO 2 de 6 · Control de calidad por día   (calidad_dias.py)
 Decide qué días entran al análisis. Un día se excluye si su porcentaje de filas sin observación supera
 en más de 10 puntos a la referencia: la mediana de los 14 días válidos anteriores.
 
-Días con datos: 47 (10/09/2026 → 29/10/2026). Se usan 40 y se excluyen 7.
+Días con datos: 55 (10/09/2026 → 09/11/2026). Se usan 48 y se excluyen 7.
 
 Días excluidos:
   día          sin observación   referencia   límite para excluir
@@ -38,7 +46,7 @@ Días excluidos:
   25/10/2026       56,4 %         7,3 %        17,3 %
   26/10/2026       58,3 %         7,3 %        17,3 %
 
-De los 40 días usados, 8 tienen historia incompleta: falta o se excluyó alguno de los 3 días
+De los 48 días usados, 11 tienen historia incompleta: falta o se excluyó alguno de los 3 días
 anteriores, así que las variables que miran errores pasados quedan vacías en buena parte. Se usan,
 pero en la evaluación de los modelos se miran aparte.
   10/09/2026: faltan 09/09, 08/09, 07/09 (anteriores al comienzo de los datos)
@@ -49,8 +57,11 @@ pero en la evaluación de los modelos se miran aparte.
   18/10/2026: faltan 15/10
   21/10/2026: faltan 20/10, 19/10
   29/10/2026: faltan 28/10, 27/10, 26/10
+  02/11/2026: faltan 01/11, 31/10, 30/10
+  03/11/2026: faltan 01/11, 31/10
+  04/11/2026: faltan 01/11
 
-ALARMA: entre el 16/10 y el 29/10 solo 5 de 14 días son usables (36 %; mínimo esperado: 70 %).
+ALARMA: entre el 27/10 y el 09/11 solo 9 de 14 días son usables (64 %; mínimo esperado: 70 %).
         La fuente de datos viene fallando de forma sostenida en las últimas dos semanas.
 Detalle de todos los días: data/calidad/REGISTRO_CALIDAD.md
 
@@ -63,13 +74,13 @@ Arma los cortes para evaluar los modelos como se usarían de verdad: cada modelo
 pasados y se prueba con días posteriores. Entre ambos se descartan 2 días para que la prueba no comparta
 la memoria del error (unas 6 h) ni el mismo régimen de tiempo con el final del entrenamiento.
 
-Días disponibles (sin los excluidos): 40, del 10/09/2026 al 29/10/2026. Pliegues (cortes entrenamiento/prueba): 4.
+Días disponibles (sin los excluidos): 48, del 10/09/2026 al 09/11/2026. Pliegues (cortes entrenamiento/prueba): 4.
 
   pliegue   entrena con               se descartan   prueba con
-  1         10/09 → 27/09 (18 días)   2 días         30/09 → 04/10 (5 días)
-  2         10/09 → 02/10 (23 días)   2 días         05/10 → 09/10 (5 días)
-  3         10/09 → 07/10 (28 días)   2 días         10/10 → 14/10 (5 días)
-  4         10/09 → 13/10 (34 días)   2 días         16/10 → 29/10 (5 días, salteando días excluidos o sin archivo)
+  1         10/09 → 05/10 (26 días)   2 días         08/10 → 12/10 (5 días)
+  2         10/09 → 10/10 (31 días)   2 días         13/10 → 18/10 (5 días, salteando días excluidos o sin archivo)
+  3         10/09 → 18/10 (38 días)   2 días         21/10 → 04/11 (5 días, salteando días excluidos o sin archivo)
+  4         10/09 → 02/11 (41 días)   2 días         05/11 → 09/11 (5 días)
 
 Controles: el entrenamiento siempre termina antes de la prueba, con la separación pedida, y los bloques de prueba no se pisan → OK
 
@@ -85,7 +96,7 @@ no aporta nada. Cada una suma una corrección al pronóstico:
   B2  error medio de esa estación a esa hora del día (hora solar), en el entrenamiento
   B3  último error conocido de la estación, mismo horizonte, observado antes de emitir el pronóstico
 
-Control de causalidad: en las 17.979.333 filas donde B3 usa un error pasado, ninguna usa una observación
+Control de causalidad: en las 20.901.028 filas donde B3 usa un error pasado, ninguna usa una observación
 que llegó después de emitido el pronóstico → OK
 
 Métricas, en °C (más bajo es mejor salvo el sesgo, que conviene cerca de 0). Se calculan en cada pliegue y se
@@ -96,51 +107,52 @@ promedian. Solo cuentan filas con observación real (no interpoladas) y las mism
 
 A. Días de prueba con historia completa (los 3 días previos tienen datos). Es la comparación limpia. 3 pliegues.
   horizonte        B0      B1      B2      B3   mejor
-  MAE todos     1,476   1,482   1,393   1,953   B2
-  MAE 1 h       1,337   1,342   1,262   1,257   B3
-  MAE 3 h       1,357   1,361   1,276   1,594   B2
-  MAE 6 h       1,373   1,378   1,289   1,876   B2
-  MAE 12 h      1,391   1,399   1,329   2,022   B2
-  MAE 24 h      1,492   1,498   1,402   1,792   B2
-  MAE 48 h      1,603   1,603   1,519   1,984   B2
-  RMSE todos    1,870   1,877   1,772   2,500
-  sesgo todos  -0,090  -0,193  -0,154   0,014
+  MAE todos     1,519   1,520   1,410   2,027   B2
+  MAE 1 h       1,352   1,354   1,268   1,278   B2
+  MAE 3 h       1,376   1,377   1,283   1,610   B2
+  MAE 6 h       1,403   1,404   1,296   1,901   B2
+  MAE 12 h      1,426   1,429   1,335   2,066   B2
+  MAE 24 h      1,539   1,540   1,419   1,861   B2
+  MAE 48 h      1,668   1,667   1,563   2,124   B2
+  RMSE todos    1,918   1,920   1,795   2,585
+  sesgo todos   0,011  -0,047  -0,031   0,076
 
 B. Días de prueba con historia incompleta (siguen a días faltantes o excluidos). Mide la
-   robustez cuando el sistema viene de una caída. 1 pliegue.
+   robustez cuando el sistema viene de una caída. 2 pliegues.
   horizonte        B0      B1      B2      B3   mejor
-  MAE todos     1,516   1,513   1,377   2,046   B2
-  MAE 1 h       1,406   1,405   1,273   1,345   B2
-  MAE 3 h       1,430   1,428   1,295   1,694   B2
-  MAE 6 h       1,445   1,444   1,307   2,030   B2
-  MAE 12 h      1,452   1,451   1,333   2,230   B2
-  MAE 24 h      1,475   1,472   1,342   1,644   B2
-  MAE 48 h      1,771   1,767   1,615   2,108   B2
-  RMSE todos    1,919   1,916   1,729   2,645
-  sesgo todos   0,300   0,284   0,299   0,209
+  MAE todos     1,523   1,517   1,390   2,005   B2
+  MAE 1 h       1,405   1,402   1,291   1,325   B2
+  MAE 3 h       1,430   1,426   1,312   1,662   B2
+  MAE 6 h       1,448   1,443   1,320   1,985   B2
+  MAE 12 h      1,438   1,435   1,338   2,130   B2
+  MAE 24 h      1,501   1,493   1,366   1,680   B2
+  MAE 48 h      1,769   1,758   1,605   2,059   B2
+  RMSE todos    1,913   1,906   1,742   2,580
+  sesgo todos   0,345   0,300   0,304   0,154
 
 C. Todos los días de prueba juntos. 4 pliegues.
   horizonte        B0      B1      B2      B3   mejor
-  MAE todos     1,486   1,490   1,389   1,976   B2
-  MAE 1 h       1,354   1,358   1,265   1,279   B2
-  MAE 3 h       1,375   1,378   1,281   1,619   B2
-  MAE 6 h       1,391   1,394   1,293   1,914   B2
-  MAE 12 h      1,406   1,412   1,330   2,074   B2
-  MAE 24 h      1,488   1,491   1,387   1,755   B2
-  MAE 48 h      1,645   1,644   1,543   2,015   B2
-  RMSE todos    1,882   1,887   1,761   2,536
-  sesgo todos   0,007  -0,073  -0,041   0,062
+  MAE todos     1,538   1,537   1,423   2,024   B2
+  MAE 1 h       1,390   1,390   1,298   1,302   B2
+  MAE 3 h       1,416   1,416   1,315   1,641   B2
+  MAE 6 h       1,438   1,437   1,324   1,950   B2
+  MAE 12 h      1,447   1,448   1,355   2,107   B2
+  MAE 24 h      1,548   1,546   1,424   1,801   B2
+  MAE 48 h      1,699   1,695   1,577   2,056   B2
+  RMSE todos    1,935   1,935   1,798   2,591
+  sesgo todos   0,127   0,074   0,083   0,059
 
 Filas comparadas: B2 no existe si la estación no tiene historia a esa hora en el entrenamiento, y B3 si no hay
 un error reciente. Se comparan solo las filas donde existen los dos.
   pliegue   días de prueba        filas comparadas   % de las filas de prueba con observación
-  1         historia completa         1.948.651      74,7 %
-  2         historia completa         2.079.288      76,9 %
-  3         historia completa         2.137.978      78,2 %
-  4         historia incompleta       1.384.647      50,5 %
+  1         historia completa         2.110.096      76,4 %
+  2         historia completa           834.719      77,8 %
+  2         historia incompleta         957.762      56,8 %
+  3         historia incompleta       1.165.635      43,2 %
+  4         historia completa         1.931.172      71,4 %
 Resultados completos: data/resultados/baselines_por_pliegue.csv y baselines_resumen.csv
 
-(paso 4 terminado en 20 s)
+(paso 4 terminado en 22 s)
 
 ====================================================================================================
 PASO 5 de 6 · Variables para los modelos   (features.py)
@@ -157,9 +169,9 @@ dinámica.
 
 Estaciones vecinas (las 5 más cercanas a menos de 100 km, para la familia «vecinos»): 4,6 por estación
 en promedio; 0 de 519 estaciones no tienen ninguna a menos de esa distancia.
-Variables calculadas para 47 días → data/features/
+Variables calculadas para 55 días → data/features/
 
-(paso 5 terminado en 206 s)
+(paso 5 terminado en 435 s)
 
 ====================================================================================================
 PASO 6 de 6 · Control independiente de las variables   (verificar_features.py)
@@ -167,7 +179,7 @@ PASO 6 de 6 · Control independiente de las variables   (verificar_features.py)
 Revisa las variables del paso anterior por otro camino: si el cálculo original tuviera un error, acá no
 coincidiría. Si algún control falla, el pipeline se detiene.
 
-1. Causalidad: de 27.818.020 filas, 0 usan un dato observado después de emitido el pronóstico → OK
+1. Causalidad: de 32.564.242 filas, 0 usan un dato observado después de emitido el pronóstico → OK
 
 2. Recálculo a mano (pandas fila por fila, vecinas con otro método) de 1.500 filas al azar de 25 estaciones,
    34 variables. Filas donde el valor original y el recalculado difieren en más de 0,001:
@@ -176,7 +188,7 @@ coincidiría. Si algún control falla, el pipeline se detiene.
    después del de la fila → OK
 
 3. Altura del sol y noche (control físico, sin usar la fórmula del cálculo):
-   al mediodía solar el sol tiene que estar sobre el horizonte: altura mínima 29,0° → OK
+   al mediodía solar el sol tiene que estar sobre el horizonte: altura mínima 25,6° → OK
    a la medianoche solar tiene que estar debajo: altura máxima -37,3° → OK
    horas de noche por día (mediana entre estaciones y días): 12,0 h;
    entre 10 y 14 h es lo esperable en estas latitudes y fechas → OK
@@ -185,34 +197,34 @@ Informativo (no detiene el pipeline):
 
 4. Variables sin valor (% de filas). Es esperable: las que miran errores pasados quedan vacías si no hubo
    observación real en ese momento, y las que necesitan varios días previos, al comienzo del período.
-   base          temp_anom 6,5 %, hum_pron < 0,1 %
+   base          temp_anom 9,3 %, hum_pron < 0,1 %
    pendiente     pendiente_pron < 0,1 %
-   rezagos       err_ult 35,4 %, err_media3 32,7 %, err_media6 29,1 %, err_ayer 36,4 %
-   sesgo_ewma    sesgo_ewma_05 12,2 %, sesgo_ewma_10 12,2 %, sesgo_ewma_20 12,2 %, sesgo_ewma_30 12,2 %
-   vecinos       vec_err_ult 13,9 %, vec_err_1h 13,7 %
-   revision      rev_3h 6,5 %, rev_6h 12,9 %, rev_12h 25,4 %, rev_24h 50,5 %
-   rezagos_extra err_hace9h 35,9 %, err_hace12h 36,1 %, err_hace15h 36,3 %, err_hace18h 36,4 %,
-                 err_hace21h 36,5 %, err1h_ult 35,0 %, err1h_media2 26,0 %, err1h_media4 28,2 %,
-                 err1h_media8 29,4 %
-   dinamica      obs_tend3h 44,8 %, err1h_tend3h 45,2 %, salto_obs 34,8 %, err_rocio_ult 40,4 %,
-                 err_rocio_1h 40,1 %, err_std6 29,1 %, err_std24 24,7 %, dispersion_emis 4,2 %,
-                 amplitud_pron 0,7 %
+   rezagos       err_ult 35,8 %, err_media3 32,8 %, err_media6 28,5 %, err_ayer 37,3 %
+   sesgo_ewma    sesgo_ewma_05 11,1 %, sesgo_ewma_10 11,1 %, sesgo_ewma_20 11,1 %, sesgo_ewma_30 11,1 %
+   vecinos       vec_err_ult 14,8 %, vec_err_1h 14,6 %
+   revision      rev_3h 6,5 %, rev_6h 12,8 %, rev_12h 25,4 %, rev_24h 50,5 %
+   rezagos_extra err_hace9h 36,7 %, err_hace12h 37,0 %, err_hace15h 37,2 %, err_hace18h 37,5 %,
+                 err_hace21h 37,8 %, err1h_ult 35,5 %, err1h_media2 25,8 %, err1h_media4 27,6 %,
+                 err1h_media8 28,7 %
+   dinamica      obs_tend3h 46,1 %, err1h_tend3h 46,5 %, salto_obs 35,3 %, err_rocio_ult 49,1 %,
+                 err_rocio_1h 48,8 %, err_std6 28,5 %, err_std24 24,4 %, dispersion_emis 4,2 %,
+                 amplitud_pron 0,8 %
 
 5. Condición del tiempo que pronosticó el NWS (sus textos agrupados por palabras clave), % de filas:
-   despejado   52,2 %
-   lluvia      12,8 %
-   parcial     12,5 %
-   nublado     11,9 %
-   tormenta     6,6 %
-   niebla       2,9 %
+   despejado   50,0 %
+   lluvia      13,7 %
+   parcial     13,3 %
+   nublado     12,8 %
+   tormenta     6,1 %
+   niebla       3,0 %
    otro         1,1 %
    nieve        0,1 %
 
-6. Viento sin dirección en el pronóstico: 18,7 % de las filas. Velocidad media pronosticada: 0,0 km/h
+6. Viento sin dirección en el pronóstico: 18,3 % de las filas. Velocidad media pronosticada: 0,0 km/h
    en esas filas contra 11,5 km/h en las que tienen dirección → la dirección falta porque el viento es calmo,
    no por un dato perdido.
 
-(paso 6 terminado en 188 s)
+(paso 6 terminado en 265 s)
 
 ====================================================================================================
 Pipeline completo: los 6 pasos terminaron y todos los controles pasaron.
