@@ -23,3 +23,125 @@ Días recalculados en esta corrida: 0 (solo los nuevos o aquellos cuya observaci
 ====================================================================================================
 PASO 2 de 6 · Control de calidad por día   (calidad_dias.py)
 ====================================================================================================
+Decide qué días entran al análisis. Un día se excluye si su porcentaje de filas sin observación supera
+en más de 10 puntos a la referencia: la mediana de los 14 días válidos anteriores.
+
+Días con datos: 47 (10/09/2026 → 29/10/2026). Se usan 40 y se excluyen 7.
+
+Días excluidos:
+  día          sin observación   referencia   límite para excluir
+  19/10/2026       21,7 %         7,3 %        17,3 %
+  20/10/2026       17,9 %         7,3 %        17,3 %
+  22/10/2026       48,1 %         7,3 %        17,3 %
+  23/10/2026       56,1 %         7,3 %        17,3 %
+  24/10/2026       55,9 %         7,3 %        17,3 %
+  25/10/2026       56,4 %         7,3 %        17,3 %
+  26/10/2026       58,3 %         7,3 %        17,3 %
+
+De los 40 días usados, 8 tienen historia incompleta: falta o se excluyó alguno de los 3 días
+anteriores, así que las variables que miran errores pasados quedan vacías en buena parte. Se usan,
+pero en la evaluación de los modelos se miran aparte.
+  10/09/2026: faltan 09/09, 08/09, 07/09 (anteriores al comienzo de los datos)
+  11/09/2026: faltan 09/09, 08/09 (anteriores al comienzo de los datos)
+  12/09/2026: faltan 09/09 (anteriores al comienzo de los datos)
+  16/10/2026: faltan 15/10
+  17/10/2026: faltan 15/10
+  18/10/2026: faltan 15/10
+  21/10/2026: faltan 20/10, 19/10
+  29/10/2026: faltan 28/10, 27/10, 26/10
+
+ALARMA: entre el 16/10 y el 29/10 solo 5 de 14 días son usables (36 %; mínimo esperado: 70 %).
+        La fuente de datos viene fallando de forma sostenida en las últimas dos semanas.
+Detalle de todos los días: data/calidad/REGISTRO_CALIDAD.md
+
+(paso 2 terminado en 3 s)
+
+====================================================================================================
+PASO 3 de 6 · Esquema de validación   (validacion.py)
+====================================================================================================
+Arma los cortes para evaluar los modelos como se usarían de verdad: cada modelo entrena con días
+pasados y se prueba con días posteriores. Entre ambos se descartan 2 días para que la prueba no comparta
+la memoria del error (unas 6 h) ni el mismo régimen de tiempo con el final del entrenamiento.
+
+Días disponibles (sin los excluidos): 40, del 10/09/2026 al 29/10/2026. Pliegues (cortes entrenamiento/prueba): 4.
+
+  pliegue   entrena con               se descartan   prueba con
+  1         10/09 → 27/09 (18 días)   2 días         30/09 → 04/10 (5 días)
+  2         10/09 → 02/10 (23 días)   2 días         05/10 → 09/10 (5 días)
+  3         10/09 → 07/10 (28 días)   2 días         10/10 → 14/10 (5 días)
+  4         10/09 → 13/10 (34 días)   2 días         16/10 → 29/10 (5 días, salteando días excluidos o sin archivo)
+
+Controles: el entrenamiento siempre termina antes de la prueba, con la separación pedida, y los bloques de prueba no se pisan → OK
+
+(paso 3 terminado en 0 s)
+
+====================================================================================================
+PASO 4 de 6 · Baselines (correcciones simples a superar)   (baselines.py)
+====================================================================================================
+Calcula cuatro correcciones simples del pronóstico del NWS. Son la vara mínima: un modelo que no les gana
+no aporta nada. Cada una suma una corrección al pronóstico:
+  B0  NWS sin corregir (corrección 0)
+  B1  error medio de todo el entrenamiento
+  B2  error medio de esa estación a esa hora del día (hora solar), en el entrenamiento
+  B3  último error conocido de la estación, mismo horizonte, observado antes de emitir el pronóstico
+
+Control de causalidad: en las 17.979.333 filas donde B3 usa un error pasado, ninguna usa una observación
+que llegó después de emitido el pronóstico → OK
+
+Métricas, en °C (más bajo es mejor salvo el sesgo, que conviene cerca de 0). Se calculan en cada pliegue y se
+promedian. Solo cuentan filas con observación real (no interpoladas) y las mismas filas para los cuatro:
+  MAE   error absoluto medio de la temperatura ya corregida (métrica principal)
+  RMSE  como el MAE, pero castiga más los errores grandes
+  sesgo error medio que queda (observado − corregido): positivo = el pronóstico corregido quedó frío
+
+A. Días de prueba con historia completa (los 3 días previos tienen datos). Es la comparación limpia. 3 pliegues.
+  horizonte        B0      B1      B2      B3   mejor
+  MAE todos     1,476   1,482   1,393   1,953   B2
+  MAE 1 h       1,337   1,342   1,262   1,257   B3
+  MAE 3 h       1,357   1,361   1,276   1,594   B2
+  MAE 6 h       1,373   1,378   1,289   1,876   B2
+  MAE 12 h      1,391   1,399   1,329   2,022   B2
+  MAE 24 h      1,492   1,498   1,402   1,792   B2
+  MAE 48 h      1,603   1,603   1,519   1,984   B2
+  RMSE todos    1,870   1,877   1,772   2,500
+  sesgo todos  -0,090  -0,193  -0,154   0,014
+
+B. Días de prueba con historia incompleta (siguen a días faltantes o excluidos). Mide la
+   robustez cuando el sistema viene de una caída. 1 pliegue.
+  horizonte        B0      B1      B2      B3   mejor
+  MAE todos     1,516   1,513   1,377   2,046   B2
+  MAE 1 h       1,406   1,405   1,273   1,345   B2
+  MAE 3 h       1,430   1,428   1,295   1,694   B2
+  MAE 6 h       1,445   1,444   1,307   2,030   B2
+  MAE 12 h      1,452   1,451   1,333   2,230   B2
+  MAE 24 h      1,475   1,472   1,342   1,644   B2
+  MAE 48 h      1,771   1,767   1,615   2,108   B2
+  RMSE todos    1,919   1,916   1,729   2,645
+  sesgo todos   0,300   0,284   0,299   0,209
+
+C. Todos los días de prueba juntos. 4 pliegues.
+  horizonte        B0      B1      B2      B3   mejor
+  MAE todos     1,486   1,490   1,389   1,976   B2
+  MAE 1 h       1,354   1,358   1,265   1,279   B2
+  MAE 3 h       1,375   1,378   1,281   1,619   B2
+  MAE 6 h       1,391   1,394   1,293   1,914   B2
+  MAE 12 h      1,406   1,412   1,330   2,074   B2
+  MAE 24 h      1,488   1,491   1,387   1,755   B2
+  MAE 48 h      1,645   1,644   1,543   2,015   B2
+  RMSE todos    1,882   1,887   1,761   2,536
+  sesgo todos   0,007  -0,073  -0,041   0,062
+
+Filas comparadas: B2 no existe si la estación no tiene historia a esa hora en el entrenamiento, y B3 si no hay
+un error reciente. Se comparan solo las filas donde existen los dos.
+  pliegue   días de prueba        filas comparadas   % de las filas de prueba con observación
+  1         historia completa         1.948.651      74,7 %
+  2         historia completa         2.079.288      76,9 %
+  3         historia completa         2.137.978      78,2 %
+  4         historia incompleta       1.384.647      50,5 %
+Resultados completos: data/resultados/baselines_por_pliegue.csv y baselines_resumen.csv
+
+(paso 4 terminado en 20 s)
+
+====================================================================================================
+PASO 5 de 6 · Variables para los modelos   (features.py)
+====================================================================================================
