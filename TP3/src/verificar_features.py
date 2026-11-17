@@ -5,11 +5,14 @@ Uso:  .venv/bin/python src/verificar_features.py
 """
 from pathlib import Path
 import glob
+import textwrap
 
 import numpy as np
 import pandas as pd
 
 from sklearn.neighbors import BallTree
+
+from formato import n, dec, pct
 
 from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM, VEC, REVISION_H, REZAGOS_LARGOS_H, VENTANAS_1H, \
     VENTANAS_STD, DISP_H, MIN_DISP, AMP_H, MIN_AMP
@@ -27,7 +30,10 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     # llegar hasta 59 min después de su hora; tiene que estar antes de la emisión.
     ultima_fuente = F["target_time_utc"] - (F["h"] + RETRASO) * H + pd.Timedelta(minutes=59)
     viola = int((ultima_fuente > F["forecast_generated_at_utc"]).sum())
-    print(f"causalidad: {viola} filas de {len(F):,} usan una fuente posterior a la emisión")
+    print("Revisa las variables del paso anterior por otro camino: si el cálculo original tuviera un error, acá no\n"
+          "coincidiría. Si algún control falla, el pipeline se detiene.\n")
+    print(f"1. Causalidad: de {n(len(F))} filas, {n(viola)} usan un dato observado después de emitido el pronóstico → "
+          + ("OK" if viola == 0 else "FALLA"))
     assert viola == 0
 
     # (2) recálculo independiente en una muestra de estaciones
@@ -134,11 +140,14 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
             x = r[c]
             if not ((np.isnan(v) and np.isnan(x)) or abs(v - x) < 1e-3):
                 errores[c] += 1
-    print(f"recálculo independiente de {n_filas} filas ({n_estaciones} estaciones):")
-    for c, n in errores.items():
-        print(f"  {c:<16} discrepancias: {n}")
-    print(f"  temp_anom con una fuente emitida después de la fila: {anom_posterior}")
-    print(f"  revisión con un pronóstico emitido después de la fila: {rev_posterior}")
+    malas = {c: k for c, k in errores.items() if k}
+    print(f"\n2. Recálculo a mano (pandas fila por fila, vecinas con otro método) de {n(n_filas)} filas al azar de "
+          f"{n_estaciones} estaciones,\n   {len(errores)} variables. Filas donde el valor original y el recalculado "
+          "difieren en más de 0,001:")
+    print("   0 filas en todas las variables → OK" if not malas else
+          "\n".join(f"   {c}: {k} filas → FALLA" for c, k in malas.items()))
+    print(f"   Variables que miran pronósticos anteriores (anomalía de temperatura, revisión): {anom_posterior + rev_posterior} "
+          "usan un pronóstico emitido\n   después del de la fila → " + ("OK" if anom_posterior + rev_posterior == 0 else "FALLA"))
     assert sum(errores.values()) == 0 and anom_posterior == 0 and rev_posterior == 0
 
     # (3) noche: control físico de la elevación solar (independiente de la fórmula)
@@ -146,15 +155,30 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     mediodia = F.loc[(hs > 11.5) & (hs < 12.5), "elev_solar"]
     medianoche = F.loc[(hs < 0.5) | (hs > 23.5), "elev_solar"]
     horas_noche = F.groupby([F["station_id"], F["target_time_utc"].dt.normalize()])["noche"].mean().mul(24).median()
-    print(f"\nnoche: elevación al mediodía solar mín {mediodia.min():.1f}°, a la medianoche solar máx {medianoche.max():.1f}° "
-          f"| horas de noche por día (mediana): {horas_noche:.1f}")
+    print("\n3. Altura del sol y noche (control físico, sin usar la fórmula del cálculo):")
+    print(f"   al mediodía solar el sol tiene que estar sobre el horizonte: altura mínima {dec(mediodia.min())}° → " + ("OK" if mediodia.min() > 0 else "FALLA"))
+    print(f"   a la medianoche solar tiene que estar debajo: altura máxima {dec(medianoche.max())}° → " + ("OK" if medianoche.max() < 0 else "FALLA"))
+    print(f"   horas de noche por día (mediana entre estaciones y días): {dec(horas_noche)} h;\n"
+          "   entre 10 y 14 h es lo esperable en estas latitudes y fechas → " + ("OK" if 10 < horas_noche < 14 else "FALLA"))
     assert mediodia.min() > 0 and medianoche.max() < 0 and 10 < horas_noche < 14
-    print("\nfaltantes por variable (% de filas):")
-    print((F[sum(FAMILIAS.values(), [])].isna().mean() * 100).round(1).to_string())
-    print("\ncondición:", F["condicion"].value_counts(normalize=True).round(3).to_dict())
-    print("viento calmo (sin dirección):", round(F["viento_calmo"].mean(), 3),
-          "| velocidad media con dirección faltante:", round(F.loc[F["viento_calmo"], "viento_vel"].mean(), 2),
-          "km/h, con dirección:", round(F.loc[~F["viento_calmo"], "viento_vel"].mean(), 2))
+
+    print("\nInformativo (no detiene el pipeline):")
+    print("\n4. Variables sin valor (% de filas). Es esperable: las que miran errores pasados quedan vacías si no hubo\n"
+          "   observación real en ese momento, y las que necesitan varios días previos, al comienzo del período.")
+    falt = F[sum(FAMILIAS.values(), [])].isna().mean()
+    for fam, cols in FAMILIAS.items():
+        con = [(c, falt[c]) for c in cols if falt[c] > 0]
+        texto = "sin faltantes" if not con else ", ".join(f"{c}\u00a0{pct(v) if v >= 0.001 else '< 0,1 %'}".replace(" ", "\u00a0") for c, v in con)
+        print(textwrap.fill(texto, 112, initial_indent=f"   {fam:<14}", subsequent_indent=" " * 17))
+
+    print("\n5. Condición del tiempo que pronosticó el NWS (sus textos agrupados por palabras clave), % de filas:")
+    for c, v in F["condicion"].value_counts(normalize=True).items():
+        print(f"   {c:<10} {pct(v):>7}")
+
+    calmo = F["viento_calmo"]
+    print(f"\n6. Viento sin dirección en el pronóstico: {pct(calmo.mean())} de las filas. Velocidad media pronosticada: "
+          f"{dec(F.loc[calmo, 'viento_vel'].mean())} km/h\n   en esas filas contra {dec(F.loc[~calmo, 'viento_vel'].mean())} km/h "
+          "en las que tienen dirección → la dirección falta porque el viento es calmo,\n   no por un dato perdido.")
 
 
 if __name__ == "__main__":

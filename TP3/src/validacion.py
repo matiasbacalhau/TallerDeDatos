@@ -91,8 +91,16 @@ if __name__ == "__main__":
     d = dias_disponibles()
     pl = pliegues_walk_forward(d)
     verificar(pl, CFG["gap_dias"])
-    print(f"{len(d)} días ({d.min().date()} → {d.max().date()}) | {len(pl)} pliegues")
+    g = CFG["gap_dias"]
+    print("Arma los cortes para evaluar los modelos como se usarían de verdad: cada modelo entrena con días\n"
+          f"pasados y se prueba con días posteriores. Entre ambos se descartan {g} días para que la prueba no comparta\n"
+          "la memoria del error (unas 6 h) ni el mismo régimen de tiempo con el final del entrenamiento.\n")
+    print(f"Días disponibles (sin los excluidos): {len(d)}, del {d.min():%d/%m/%Y} al {d.max():%d/%m/%Y}. Pliegues (cortes entrenamiento/prueba): {len(pl)}.\n")
+    print("  pliegue   entrena con               se descartan   prueba con")
     for k, (e, p) in enumerate(pl, 1):
-        print(f"pliegue {k}: entrena {e.min().date()} → {e.max().date()} ({len(e)} d) | "
-              f"gap {CFG['gap_dias']} d | prueba {p.min().date()} → {p.max().date()} ({len(p)} d)")
-    print("controles OK")
+        hueco = (p.max() - p.min()).days + 1 > len(p)
+        print(f"  {k}         {e.min():%d/%m} → {e.max():%d/%m} ({len(e):>2} días)   "
+              f"{(p.min() - e.max()).days - 1} días         {p.min():%d/%m} → {p.max():%d/%m} ({len(p)} días"
+              + (", salteando días excluidos o sin archivo)" if hueco else ")"))
+    print("\nControles: el entrenamiento siempre termina antes de la prueba, con la separación pedida, y los "
+          "bloques de prueba no se pisan → OK")

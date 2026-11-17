@@ -23,6 +23,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import yaml
 
+from formato import n, pct, fecha
+
 RAIZ = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 ENTRADA = (RAIZ / CFG["entrada"]).resolve()
@@ -104,9 +106,12 @@ def main(rehacer=False):
     assert not repetidos, f"días con más de un archivo: {sorted(repetidos)}"
     fechas = pd.to_datetime(dias, format="%Y_%m_%d")
     faltan = pd.date_range(fechas.min(), fechas.max()).difference(fechas)
+    print("Lee los CSV diarios (pronóstico del NWS + temperatura observada), une cada pronóstico con lo que")
+    print("realmente se midió y calcula el error de temperatura: error = observado − pronosticado, en °C.\n")
+    print(f"Archivos de entrada: {len(archivos)} días, del {fecha(fechas.min())} al {fecha(fechas.max())}.")
     if len(faltan):
-        print("AVISO: días sin archivo:", [x.strftime("%d/%m") for x in faltan])
-    print(f"{len(archivos)} archivos diarios en la entrada")
+        print(f"AVISO: no hay archivo para {len(faltan)} días del período: "
+              f"{', '.join(x.strftime('%d/%m') for x in faltan)}. Esos días quedan fuera del análisis.")
 
     # --- Paso 1 y 2: parquet por día + observaciones únicas (solo días nuevos) ---------
     nuevos = 0
@@ -122,13 +127,12 @@ def main(rehacer=False):
         o.drop_duplicates(["station_id", "target_time_utc"]).to_parquet(obs_dir / f"{dia}.parquet", index=False)
         d.drop(columns=["temperature_observed_c"]).to_parquet(dias_dir / f"{dia}.parquet", index=False)
         nuevos += 1
-        print(" ", dia, len(d), "filas (nuevo)")
-    print("días nuevos procesados:", nuevos)
+        print(f"  día nuevo {dia[8:]}/{dia[5:7]}/{dia[:4]}: {n(len(d))} filas")
+    print(f"Días leídos en esta corrida: {nuevos} (los demás ya estaban procesados de corridas anteriores).")
 
     obs = pd.concat([pd.read_parquet(p) for p in sorted(obs_dir.glob("*.parquet"))], ignore_index=True)
     # control: una observación por estación-hora (si hubiera valores distintos, avisamos)
     dup = obs.duplicated(["station_id", "target_time_utc"]).sum()
-    print("observaciones únicas:", len(obs), "| duplicados tras unir días:", dup)
     obs = obs.drop_duplicates(["station_id", "target_time_utc"])
 
     # --- Paso 3: grilla horaria completa por estación + interpolación ------------------
@@ -146,10 +150,17 @@ def main(rehacer=False):
                                     "obs_interpolada": interpolada.values}))
     obs_h = pd.concat(partes, ignore_index=True)
     obs_h.to_parquet(SALIDA / "obs_horaria.parquet", index=False)
-    real = serie.notna().sum()
-    print(f"grilla estación-hora: {len(obs_h)} | reales: {real} ({real/len(obs_h):.1%}) "
-          f"| interpoladas: {obs_h.obs_interpolada.sum()} ({obs_h.obs_interpolada.mean():.1%}) "
-          f"| sin dato: {obs_h.temp_obs_c.isna().sum()} ({obs_h.temp_obs_c.isna().mean():.1%})")
+    real, interp, sin = serie.notna().sum(), obs_h.obs_interpolada.sum(), obs_h.temp_obs_c.isna().sum()
+    tot = len(obs_h)
+    print(f"\nTemperatura observada: una lectura por estación y hora ({len(estaciones)} estaciones × "
+          f"{n(len(horas))} horas = {n(tot)} lecturas posibles)")
+    print(f"  con lectura real del NWS:      {n(real):>9}  ({pct(real / tot)})")
+    print(f"  completadas por interpolación: {n(interp):>9}  ({pct(interp / tot)})  "
+          f"huecos de hasta {MAX_HUECO} h entre dos lecturas reales")
+    print(f"  sin dato:                      {n(sin):>9}  ({pct(sin / tot)})  "
+          f"huecos más largos: esas horas quedan sin error")
+    print(f"  lecturas repetidas entre archivos de días distintos: {n(dup)}"
+          + ("" if dup == 0 else " (AVISO: se conservó la primera)"))
 
     # --- Paso 4: unir al pronóstico y calcular el target (solo días que cambiaron) -----
     obs_h["dia"] = obs_h["target_time_utc"].dt.strftime("%Y_%m_%d")
@@ -172,7 +183,9 @@ def main(rehacer=False):
         hechos += 1
     manifiesto.write_text(json.dumps(huellas))
     total = sum(pq.ParquetFile(p).metadata.num_rows for p in pares_dir.glob("*.parquet"))
-    print(f"pares/ reescritos: {hechos} días | filas totales: {total}")
+    print(f"\nTabla pronóstico-observación (una fila por estación × hora objetivo × horizonte de 1 a 48 h): "
+          f"{n(total)} filas.")
+    print(f"Días recalculados en esta corrida: {hechos} (solo los nuevos o aquellos cuya observación cambió).")
 
 
 if __name__ == "__main__":

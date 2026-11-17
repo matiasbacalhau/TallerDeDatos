@@ -20,20 +20,23 @@ import sys
 import time
 
 SRC = Path(__file__).resolve().parent
-PASOS = ["preparar_datos", "calidad_dias", "validacion", "baselines", "features", "verificar_features"]
+PASOS = {"preparar_datos": "Preparar los datos", "calidad_dias": "Control de calidad por día",
+         "validacion": "Esquema de validación", "baselines": "Baselines (correcciones simples a superar)",
+         "features": "Variables para los modelos", "verificar_features": "Control independiente de las variables"}
 
 
 def main():
     extra = ["--rehacer"] if "--rehacer" in sys.argv else []
-    for paso in PASOS:
+    for i, (paso, titulo) in enumerate(PASOS.items(), 1):
         t = time.time()
-        print(f"\n===== {paso} =====", flush=True)
+        print(f"\n{'=' * 100}\nPASO {i} de {len(PASOS)} · {titulo}   ({paso}.py)\n{'=' * 100}", flush=True)
         args = [sys.executable, str(SRC / f"{paso}.py")] + (extra if paso == "preparar_datos" else [])
         r = subprocess.run(args, cwd=SRC.parent)
         if r.returncode != 0:
             sys.exit(f"FALLÓ el paso {paso} (código {r.returncode}); no se corren los siguientes.")
-        print(f"----- {paso}: {time.time() - t:.0f} s", flush=True)
-    print("\nPipeline completo. Revisar data/calidad/REGISTRO_CALIDAD.md por avisos y alarmas.")
+        print(f"\n(paso {i} terminado en {time.time() - t:.0f} s)", flush=True)
+    print(f"\n{'=' * 100}\nPipeline completo: los {len(PASOS)} pasos terminaron y todos los controles pasaron.\n"
+          "Las líneas AVISO y ALARMA de arriba no detienen el pipeline, pero conviene leerlas.")
 
 
 if __name__ == "__main__":

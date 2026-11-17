@@ -47,6 +47,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from formato import dec
+
 RAIZ = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 ALFAS = CFG["features"]["alfas_ewma"]
@@ -153,7 +155,8 @@ def tensor_ewma(ERR, t0, alfas):
     pad = nD * 24 - nT
     E = np.concatenate([ERR, np.full((NH, nS, pad), np.nan, dtype=np.float32)], axis=2) if pad else ERR
     E = E.reshape(NH, nS, nD, 24)                      # [h, s, día, hora]
-    with np.errstate(invalid="ignore"):
+    with warnings.catch_warnings():                    # horas sin ningún error real: NaN esperado
+        warnings.simplefilter("ignore", RuntimeWarning)
         M = np.nanmean(E, axis=0)                      # [s, día, hora] media sobre horizontes
     M = np.transpose(M, (0, 2, 1))                     # [s, hora, día]
     out = {}
@@ -354,7 +357,15 @@ FAMILIAS = {
 def main():
     salida = RAIZ / "data" / "features"
     salida.mkdir(exist_ok=True)
-    print("construyendo tensores...")
+    print("Calcula las variables que usan los modelos, solo con lo que se sabía al emitir cada pronóstico (nada del\n"
+          "futuro). Familias que usan los modelos del producto:\n"
+          "  base        el pronóstico mismo (temperatura, humedad, rocío, viento, lluvia, condición), horizonte,\n"
+          "              hora del día, ubicación, altura del sol y si es de noche\n"
+          "  pendiente   cuánto cambia la temperatura pronosticada alrededor de la hora objetivo\n"
+          "  rezagos     últimos errores conocidos de la misma estación y el mismo horizonte\n"
+          "  sesgo EWMA  sesgo habitual de la estación a esa hora, promediando días con más peso a los recientes\n"
+          "Familias experimentales (se calculan, pero solo se usan al probarlas): vecinos, revisión, rezagos extra,\n"
+          "dinámica.")
     estaciones, t0, ERR, TEMP, ROCP = construir_tensores()
     nT = ERR.shape[2]
     OBS = serie_obs(estaciones, t0, nT, "obs_horaria.parquet", "temp_obs_c", lambda o: ~o["obs_interpolada"])
@@ -364,14 +375,16 @@ def main():
     EW = tensor_ewma(ERR, t0, ALFAS)
     MP = tensor_media_pron(TEMP)
     V = vecinos(estaciones)
-    print(f"vecinos: {(V >= 0).sum(1).mean():.1f} por estación en promedio, {int((V[:, 0] < 0).sum())} estaciones sin ninguna")
+    print(f"\nEstaciones vecinas (las {VEC['k']} más cercanas a menos de {VEC['max_km']} km, para la familia «vecinos»): "
+          f"{dec((V >= 0).sum(1).mean())} por estación\nen promedio; {int((V[:, 0] < 0).sum())} de {len(estaciones)} "
+          "estaciones no tienen ninguna a menos de esa distancia.")
     NV = tensor_vecinos(ERR, V)
     E1 = [medias_moviles(ERR[:1], v, m) for v, m in VENTANAS_1H]      # solo el horizonte 1 h
     for p in sorted((RAIZ / "data" / "pares").glob("*.parquet")):
         d = pd.read_parquet(p, columns=COLS_LECTURA)
         features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV, E1, OBS, ROC, ROCP, SD).to_parquet(salida / p.name, index=False)
     (salida / "familias.json").write_text(json.dumps(FAMILIAS, indent=1))
-    print("listo:", len(list(salida.glob('*.parquet'))), "días")
+    print(f"Variables calculadas para {len(list(salida.glob('*.parquet')))} días → data/features/")
 
 
 if __name__ == "__main__":

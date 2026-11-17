@@ -25,6 +25,7 @@ import glob
 import numpy as np
 import pandas as pd
 
+from formato import n as n_, dec, pct
 from validacion import CFG as CFG_VAL, dias_disponibles, dias_historia_incompleta, pliegues_walk_forward, verificar
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -33,6 +34,10 @@ COLUMNAS = ["station_id", "longitude", "target_time_utc", "forecast_generated_at
 # Una observación de la hora H se registra hasta H+59 min. Para estar seguros de que
 # existía al emitir, el último error usable es el de la hora objetivo - horizonte - 2.
 RETRASO_PERSISTENCIA_H = 2
+NOMBRES = {"B0": "NWS sin corregir (corrección 0)",
+           "B1": "error medio de todo el entrenamiento",
+           "B2": "error medio de esa estación a esa hora del día (hora solar), en el entrenamiento",
+           "B3": "último error conocido de la estación, mismo horizonte, observado antes de emitir el pronóstico"}
 
 
 def cargar_pares():
@@ -106,9 +111,14 @@ def evaluar(d):
 
 
 if __name__ == "__main__":
+    print("Calcula cuatro correcciones simples del pronóstico del NWS. Son la vara mínima: un modelo que no les gana\n"
+          "no aporta nada. Cada una suma una corrección al pronóstico:")
+    for b_, txt in NOMBRES.items():
+        print(f"  {b_}  {txt}")
     d = agregar_variables(cargar_pares())
     n = prueba_causalidad(d)
-    print(f"prueba de causalidad OK ({n:,} filas con último error)")
+    print(f"\nControl de causalidad: en las {n_(n)} filas donde B3 usa un error pasado, ninguna usa una observación\n"
+          "que llegó después de emitido el pronóstico → OK")
     R = evaluar(d)
     salida = RAIZ / "data" / "resultados"
     salida.mkdir(exist_ok=True)
@@ -119,14 +129,33 @@ if __name__ == "__main__":
     n_pl = r.groupby("segmento")["pliegue"].nunique().rename("n_pliegues").reset_index()
     resumen = resumen.merge(n_pl, on="segmento")
     resumen.to_csv(salida / "baselines_resumen.csv", index=False)
-    pd.set_option("display.width", 200)
+    print("\nMétricas, en °C (más bajo es mejor salvo el sesgo, que conviene cerca de 0). Se calculan en cada pliegue y se\n"
+          "promedian. Solo cuentan filas con observación real (no interpoladas) y las mismas filas para los cuatro:\n"
+          "  MAE   error absoluto medio de la temperatura ya corregida (métrica principal)\n"
+          "  RMSE  como el MAE, pero castiga más los errores grandes\n"
+          "  sesgo error medio que queda (observado − corregido): positivo = el pronóstico corregido quedó frío")
+    titulos = {"completa": "A. Días de prueba con historia completa (los 3 días previos tienen datos). Es la comparación limpia.",
+               "incompleta": "B. Días de prueba con historia incompleta (siguen a días faltantes o excluidos). Mide la\n"
+                             "   robustez cuando el sistema viene de una caída.",
+               "todas": "C. Todos los días de prueba juntos."}
     for seg in ("completa", "incompleta", "todas"):
         x = resumen[(resumen.segmento == seg) & (resumen.universo == "reales")]
         if x.empty:
             continue
-        print(f"\n== MAE medio por pliegue · segmento: {seg} ({x.n_pliegues.iloc[0]} pliegues) · universo: reales")
-        print(x.pivot(index="horizonte", columns="baseline", values="MAE").reindex(["todos", 1, 3, 6, 12, 24, 48]))
-        print(x[x.horizonte == "todos"].set_index("baseline")[["RMSE", "sesgo"]].T)
-    print("\nfilas comunes (n por pliegue / fracción):")
-    print(R[R.universo == "cobertura_comun"][["pliegue", "segmento", "n", "MAE"]]
-          .rename(columns={"MAE": "fracción"}).to_string(index=False))
+        k = int(x.n_pliegues.iloc[0])
+        print(f"\n{titulos[seg]} {k} {'pliegue' if k == 1 else 'pliegues'}.")
+        print(f"  {'horizonte':<11}{'B0':>8}{'B1':>8}{'B2':>8}{'B3':>8}   mejor")
+        for hz in ["todos", 1, 3, 6, 12, 24, 48]:
+            fila = x[x.horizonte.astype(str) == str(hz)].set_index("baseline")["MAE"]
+            etiqueta = "todos" if hz == "todos" else f"{hz} h"
+            print(f"  {'MAE ' + etiqueta:<11}" + "".join(f"{dec(fila[b_], 3):>8}" for b_ in NOMBRES) + f"   {fila.idxmin()}")
+        tod = x[x.horizonte.astype(str) == "todos"].set_index("baseline")
+        for met in ("RMSE", "sesgo"):
+            print(f"  {met + ' todos':<11}" + "".join(f"{dec(tod.loc[b_, met], 3):>8}" for b_ in NOMBRES))
+    c = R[(R.universo == "cobertura_comun") & (R.segmento != "todas") & (R.n > 0)]
+    print("\nFilas comparadas: B2 no existe si la estación no tiene historia a esa hora en el entrenamiento, y B3 si no hay\n"
+          "un error reciente. Se comparan solo las filas donde existen los dos.")
+    print("  pliegue   días de prueba        filas comparadas   % de las filas de prueba con observación")
+    for r in c.itertuples():
+        print(f"  {r.pliegue:<9} historia {r.segmento:<12} {n_(r.n):>13}      {pct(r.MAE)}")
+    print("Resultados completos: data/resultados/baselines_por_pliegue.csv y baselines_resumen.csv")

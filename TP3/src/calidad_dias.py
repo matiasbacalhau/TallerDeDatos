@@ -36,6 +36,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from formato import dec, pct
+
 RAIZ = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 Q = CFG["calidad"]
@@ -179,19 +181,38 @@ def main():
     t.round(4).to_csv(SALIDA / "calidad_por_dia.csv", index=False)
     escribir_registro(t, sistema, cambios if archivo.exists() and previos != actuales else [])
 
-    print(f"{len(t)} días medidos | excluidos: {len(ex)} | usados: {len(t) - len(ex)} "
-          f"(con historia incompleta: {int(t['historia_incompleta'].sum())})")
-    for r in ex.itertuples():
-        print(f"AVISO: día {fmt_dia(r.dia)} excluido ({r.pct_sin_obs:.1f} % sin observación, referencia {r.referencia_pct:.1f} %)")
+    usados = t[~t["excluido"]]
+    print(f"Decide qué días entran al análisis. Un día se excluye si su porcentaje de filas sin observación supera\n"
+          f"en más de {Q['max_exceso_pp']} puntos a la referencia: la mediana de los {Q['ventana_dias']} días válidos anteriores.\n")
+    print(f"Días con datos: {len(t)} ({fmt_dia(t['dia'].iloc[0])} → {fmt_dia(t['dia'].iloc[-1])}). "
+          f"Se usan {len(usados)} y se excluyen {len(ex)}.")
+    if len(ex):
+        print("\nDías excluidos:")
+        print("  día          sin observación   referencia   límite para excluir")
+        for r in ex.itertuples():
+            print(f"  {fmt_dia(r.dia)}   {dec(r.pct_sin_obs):>8} %       {dec(r.referencia_pct):>5} %       {dec(r.umbral_pct):>5} %")
     for c in cambios:
-        print("AVISO: cambio en la lista de excluidos:", c)
+        print("AVISO: cambio respecto de la corrida anterior:", c)
+    hi = t[t["historia_incompleta"]]
+    if len(hi):
+        print(f"\nDe los {len(usados)} días usados, {len(hi)} tienen historia incompleta: falta o se excluyó alguno de los "
+              f"{Q['dias_historia']} días\nanteriores, así que las variables que miran errores pasados quedan vacías en buena parte. "
+              f"Se usan,\npero en la evaluación de los modelos se miran aparte.")
+        for r in hi.itertuples():
+            antes = r.dia <= (pd.to_datetime(t["dia"].iloc[0], format="%Y_%m_%d") + pd.Timedelta(days=Q["dias_historia"] - 1)).strftime("%Y_%m_%d")
+            print(f"  {fmt_dia(r.dia)}: faltan {r.dias_previos_faltantes}" + (" (anteriores al comienzo de los datos)" if antes else ""))
     for r in t[t["alarma_cobertura"]].itertuples():
-        print(f"ALARMA: día {fmt_dia(r.dia)} con cobertura total {r.cobertura_total:.0%} (< {Q['alarma_cobertura_min']:.0%}); se usa igual")
+        print(f"\nALARMA: el día {fmt_dia(r.dia)} se usa, pero solo el {pct(r.cobertura_total, 0)} de sus filas tiene observación "
+              f"(mínimo esperado: {pct(Q['alarma_cobertura_min'], 0)}).")
     if sistema["alarma"]:
-        print(f"ALARMA: solo {sistema['usables']} de {sistema['total']} días usables entre "
-              f"{sistema['desde']:%d/%m} y {sistema['hasta']:%d/%m} ({sistema['fraccion']:.0%})")
-    print("registro:", (SALIDA / "REGISTRO_CALIDAD.md").relative_to(RAIZ))
-
+        print(f"\nALARMA: entre el {sistema['desde']:%d/%m} y el {sistema['hasta']:%d/%m} solo {sistema['usables']} de "
+              f"{sistema['total']} días son usables ({pct(sistema['fraccion'], 0)}; mínimo esperado: "
+              f"{pct(Q['alarma_dias_utiles_min'], 0)}).\n        La fuente de datos viene fallando de forma sostenida "
+              f"en las últimas dos semanas.")
+    else:
+        print(f"\nDías usables en las últimas dos semanas ({sistema['desde']:%d/%m} → {sistema['hasta']:%d/%m}): "
+              f"{sistema['usables']} de {sistema['total']} → ok.")
+    print("Detalle de todos los días:", (SALIDA / "REGISTRO_CALIDAD.md").relative_to(RAIZ))
 
 if __name__ == "__main__":
     main()
