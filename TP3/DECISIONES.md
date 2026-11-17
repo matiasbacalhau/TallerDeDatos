@@ -348,6 +348,44 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
   - El grupo puede apartarse de la regla solo dejando escrita la razón.
 - Diseño completo: `docs/superpowers/specs/2026-11-17-experimentos-y-pliegues-anclados-design.md`.
 
+### Resultado de la experimentación y modelos finales (17/11/2026)
+
+- **Datos:** 55 días (10/09 → 09/11), 48 usables. Pliegues anclados desde el 30/09: 1–2 eligen, 3–5 reportan (5 = 02/11–06/11). Los días 07–09/11 esperan a completar un bloque.
+- **Ablación** (`notebooks/experimentos.ipynb`, pliegues de elección, historia completa). Empeoramiento del MAE al sacar cada familia, en °C (promedio / peor pliegue):
+
+  | Familia | Sin ella | Decisión |
+  |---|---|---|
+  | base | +0,017 / +0,034 | queda |
+  | sesgo EWMA | +0,015 / +0,022 | queda |
+  | rezagos | +0,006 / +0,007 | queda |
+  | pendiente | +0,006 / +0,007 | queda |
+  | revisión | +0,002 / +0,014 | queda (en el pliegue 2 supera 0,010) |
+  | rezagos extra | +0,002 / +0,003 | sale |
+  | vecinos | −0,001 / −0,001 | sale |
+  | dinámica | −0,001 / −0,001 | sale |
+
+  - Sacar las tres juntas tampoco empeora: Ridge final 1,247 °C contra 1,246 con todas (elección).
+  - Rezagos extra mueve la predicción (aporte 0,16 °C), pero repite a los rezagos (redundancia 0,87): por eso sacarla no cambia el error.
+  - El grupo no se apartó de la regla.
+- **Ridge final:** base, pendiente, rezagos, sesgo EWMA y revisión. α = 10⁵ (elegido en los pliegues 1–2; queda congelado).
+- **LightGBM:** las 8 familias. 127 hojas, pérdida L1, 150 árboles (elegido en los pliegues 1–2; queda congelado). Importancia por familia: base 57 %, sesgo EWMA 18 %, pendiente 12 %; el resto, 0,2–4 % cada una.
+- **MAE en los pliegues de reporte 3–5** (°C, todos los días de prueba):
+
+  | Horizonte | B0 NWS crudo | B2 estación × hora | Ridge | LightGBM |
+  |---|---|---|---|---|
+  | todos | 1,541 | 1,441 | 1,361 | **1,310** |
+  | 1 h | 1,380 | 1,295 | 1,063 | **1,034** |
+  | 6 h | 1,421 | 1,326 | 1,220 | **1,154** |
+  | 24 h | 1,536 | 1,430 | 1,363 | **1,311** |
+  | 48 h | 1,687 | 1,601 | 1,542 | **1,521** |
+
+  - El Ridge con 5 familias da lo mismo que con las 8 (1,361 contra 1,359): el recorte también se sostiene en los pliegues de reporte.
+- **¿Las diferencias superan el ruido?** (`comparar_modelos.py`, el día como unidad, 15 días de prueba):
+  - LightGBM − Ridge: −0,051 °C por día (IC95 −0,071 a −0,032), gana 14 de 15 días, p = 0,0002. Con historia completa: −0,054, 7 de 7 días, p = 0,0006.
+  - Ridge − B2: −0,080 °C, 14 de 15 días, p = 0,0001. B2 − B0: −0,101 °C, 13 de 15 días.
+- **Respuesta a la pregunta del producto:** la caja negra con toda la información es mejor de forma consistente, pero por poco: 0,05 °C (≈ 4 % del MAE del Ridge). El Ridge de caja de cristal ya captura la mayor parte de la mejora sobre el NWS (11,7 % contra 15,0 % de LightGBM).
+- Salida completa: `salidas/modelos_finales.txt`.
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.

@@ -59,6 +59,7 @@ SIEMPRE = ["station_id", "target_time_utc", "error_c", "obs_interpolada", "horiz
            "hora_solar_cos", "noche", "condicion"]               # evaluación, B2, interacciones y spline del horizonte
 POR_HORIZONTE = {"err_ult": "rezagos", "vec_err_1h": "vecinos"}  # su peso depende de la antelación
 BLOQUE = 200_000                                                 # filas por bloque al predecir (memoria)
+SESGO = "los 4 (lineales)"      # antes se elegía UN sesgo exponencial; ahora entran los 4 como columnas
 
 
 def alphas():
@@ -195,7 +196,8 @@ def mae_completa(T, preds):
 
 def elegir_alpha(familias, eleccion, max_filas):
     """α con menor MAE medio (historia completa) en los pliegues de elección. Si queda en un borde de la grilla,
-    se agrega un orden de magnitud hacia ese lado (hasta dos veces). Devuelve (tabla de la grilla, α)."""
+    se agrega un orden de magnitud hacia ese lado (hasta dos veces).
+    Devuelve (grilla: MAE por pliegue y α; α elegido; filas de evaluar() con ese α, por pliegue y segmento)."""
     grilla = alphas()
     datos = []
     for k, (tr, te) in eleccion:
@@ -220,7 +222,12 @@ def elegir_alpha(familias, eleccion, max_filas):
             grilla.append(mejor * 10)
         else:
             break
-    return G, float(mejor)
+    sel = []                                     # con el α elegido: filas de evaluar() (formato que leen las notebooks)
+    for k, dis, g, T in datos:
+        coef, b0 = g.resolver(np.ones(len(dis.nombres), bool), mejor)
+        sel += [f for f in evaluar(T, {"lineal": predecir(dis, coef, b0, T)}, k)
+                if f["modelo"] == "lineal" and f["horizonte"] == "todos"]
+    return G, float(mejor), pd.DataFrame(sel).assign(alpha=float(mejor), sesgo=SESGO)
 
 
 def clave_pliegue(tipo, familias, alpha, tr, te, max_filas):
@@ -259,12 +266,13 @@ def main():
     hp = None if "--reelegir" in sys.argv else hiperparametros_vigentes(ruta_hp, familias)
     if hp is None:
         print("\nEligiendo la penalización α en los pliegues de elección (criterio: MAE con historia completa)...", flush=True)
-        G, alpha = elegir_alpha(familias, eleccion, max_filas)
-        G.to_csv(salida / "interpretable_eleccion.csv", index=False)
+        G, alpha, sel = elegir_alpha(familias, eleccion, max_filas)
+        G.to_csv(salida / "interpretable_grilla_alpha.csv", index=False)
+        sel.to_csv(salida / "interpretable_eleccion.csv", index=False)
         print("  α          MAE medio (°C)")
         for a_, m_ in G.groupby("alpha")["MAE"].mean().items():
             print(f"  {a_:<10.0e} {dec(m_, 4)}" + ("   ← elegido" if a_ == alpha else ""))
-        ruta_hp.write_text(json.dumps({**P, "familias": familias, "ridge_alpha": alpha,
+        ruta_hp.write_text(json.dumps({**P, "familias": familias, "ridge_alpha": alpha, "sesgo": SESGO,
                                        "pliegues_eleccion": [k for k, _ in eleccion]}))
     else:
         alpha = hp["ridge_alpha"]
@@ -282,9 +290,8 @@ def main():
               f"entrenado con {n_(res['filas_entrenamiento'])} filas en {time.time() - t0:.0f} s"), flush=True)
     R = pd.DataFrame(filas)
     R.to_csv(salida / "interpretable_por_pliegue.csv", index=False)
-    C = pd.concat(coefs, axis=1)
-    C.insert(0, "familia", pd.Series(fam_de))
-    C.to_csv(salida / "interpretable_coeficientes.csv")
+    pd.concat(coefs, axis=1).to_csv(salida / "interpretable_coeficientes.csv")      # solo números (lo leen notebooks)
+    pd.Series(fam_de, name="familia").rename_axis("columna").to_csv(salida / "interpretable_familia_de_columna.csv")
 
     print("\nMAE en °C de la temperatura corregida (más bajo es mejor), promedio de los pliegues de reporte.")
     print("B0 = NWS sin corregir; B2 = error medio de la estación a esa hora; lineal = este modelo.")
@@ -298,7 +305,8 @@ def main():
         print(f"  {'horizonte':<10}" + "".join(f"{c:>9}" for c in ("B0", "B2", "lineal")))
         for h in ["todos", "1", "3", "6", "12", "24", "48"]:
             print(f"  {h + ('' if h == 'todos' else ' h'):<10}" + "".join(f"{dec(t.loc[h, c], 3):>9}" for c in ("B0", "B2", "lineal")))
-    print("\nResultados: data/resultados/interpretable_por_pliegue.csv, interpretable_coeficientes.csv")
+    print("\nResultados: data/resultados/interpretable_por_pliegue.csv, interpretable_coeficientes.csv, "
+          "interpretable_familia_de_columna.csv")
 
 
 if __name__ == "__main__":

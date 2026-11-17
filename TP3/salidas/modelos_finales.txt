@@ -1,0 +1,207 @@
+
+===== modelo_interpretable =====
+Modelo de caja de cristal (Ridge con curvas). Familias que usa: base, pendiente, rezagos, sesgo_ewma, revision
+Pliegues que eligen la penalización: [1, 2] · pliegues que reportan: [3, 4, 5]
+
+Eligiendo la penalización α en los pliegues de elección (criterio: MAE con historia completa)...
+  α          MAE medio (°C)
+  1e+00      1,2562
+  1e+02      1,2542
+  1e+03      1,2539
+  1e+04      1,2515
+  1e+05      1,2460   ← elegido
+  1e+06      1,2574
+  1e+07      1,3401
+pliegue 3: entrenado con 994.905 filas en 15 s
+pliegue 4: entrenado con 1.023.478 filas en 15 s
+pliegue 5: entrenado con 1.042.582 filas en 16 s
+
+MAE en °C de la temperatura corregida (más bajo es mejor), promedio de los pliegues de reporte.
+B0 = NWS sin corregir; B2 = error medio de la estación a esa hora; lineal = este modelo.
+
+Días con historia completa · pliegues [3, 5]
+  horizonte        B0       B2   lineal
+  todos         1,488    1,428    1,350
+  1 h           1,293    1,263    1,041
+  3 h           1,317    1,276    1,132
+  6 h           1,341    1,291    1,194
+  12 h          1,398    1,335    1,258
+  24 h          1,493    1,430    1,361
+  48 h          1,643    1,595    1,547
+
+Días con historia incompleta · pliegues [4, 5]
+  horizonte        B0       B2   lineal
+  todos         1,573    1,449    1,352
+  1 h           1,448    1,334    1,087
+  3 h           1,466    1,350    1,181
+  6 h           1,483    1,364    1,240
+  12 h          1,505    1,384    1,278
+  24 h          1,558    1,427    1,345
+  48 h          1,704    1,585    1,510
+
+Todos los días de prueba · pliegues [3, 4, 5]
+  horizonte        B0       B2   lineal
+  todos         1,541    1,441    1,361
+  1 h           1,380    1,295    1,063
+  3 h           1,400    1,310    1,156
+  6 h           1,421    1,326    1,220
+  12 h          1,463    1,362    1,275
+  24 h          1,536    1,430    1,363
+  48 h          1,687    1,601    1,542
+
+Resultados: data/resultados/interpretable_por_pliegue.csv, interpretable_coeficientes.csv
+real 77.14
+user 60.88
+sys 22.88
+
+===== modelo_lgbm =====
+LightGBM con las 8 familias (51 variables). Pliegues que eligen: [1, 2] · pliegues que reportan: [3, 4, 5]
+
+Hiperparámetros ya elegidos (congelados en data/resultados/lgbm_hiperparametros.json): hojas127_regression_l1, 150 árboles. Para volver a elegirlos: --reelegir
+pliegue 3: leído de la caché
+pliegue 4: leído de la caché
+pliegue 5: leído de la caché
+
+MAE en °C de la temperatura corregida (más bajo es mejor), promedio de los pliegues de reporte.
+B0 = NWS sin corregir; B2 = error medio de la estación a esa hora; lineal = Ridge; lgbm = este modelo.
+
+Días con historia completa · pliegues [3, 5]
+  horizonte        B0       B2   lineal     lgbm
+  todos         1,488    1,428    1,350    1,297
+  1 h           1,293    1,263    1,041    1,001
+  3 h           1,317    1,276    1,132    1,064
+  6 h           1,341    1,291    1,194    1,128
+  12 h          1,398    1,335    1,258    1,195
+  24 h          1,493    1,430    1,361    1,307
+  48 h          1,643    1,595    1,547    1,521
+
+Días con historia incompleta · pliegues [4, 5]
+  horizonte        B0       B2   lineal     lgbm
+  todos         1,573    1,449    1,352    1,306
+  1 h           1,448    1,334    1,087    1,062
+  3 h           1,466    1,350    1,181    1,122
+  6 h           1,483    1,364    1,240    1,174
+  12 h          1,505    1,384    1,278    1,214
+  24 h          1,558    1,427    1,345    1,299
+  48 h          1,704    1,585    1,510    1,498
+
+Todos los días de prueba · pliegues [3, 4, 5]
+  horizonte        B0       B2   lineal     lgbm
+  todos         1,541    1,441    1,361    1,310
+  1 h           1,380    1,295    1,063    1,034
+  3 h           1,400    1,310    1,156    1,094
+  6 h           1,421    1,326    1,220    1,154
+  12 h          1,463    1,362    1,275    1,211
+  24 h          1,536    1,430    1,363    1,311
+  48 h          1,687    1,601    1,542    1,521
+
+Importancia por familia (fracción de la ganancia de los árboles, media de los pliegues):
+  base           57,2 %
+  sesgo_ewma     18,0 %
+  pendiente      11,7 %
+  dinamica       4,1 %
+  revision       3,7 %
+  rezagos        2,7 %
+  rezagos_extra  2,4 %
+  vecinos        0,2 %
+real 3.67
+user 2.34
+sys 0.53
+
+===== comparar_modelos =====
+pliegue 3: 2,332,008 filas de prueba
+pliegue 4: 2,284,200 filas de prueba
+pliegue 5: 2,133,743 filas de prueba
+
+MAE por día (°C):
+ pliegue        dia      n    B0    B2  lineal  lgbm   historia
+       3 2026_10_10 474391 1.684 1.552   1.481 1.408   completa
+       3 2026_10_11 481847 1.642 1.654   1.584 1.546   completa
+       3 2026_10_12 457884 1.475 1.440   1.451 1.424   completa
+       3 2026_10_13 446602 1.425 1.275   1.251 1.166   completa
+       3 2026_10_14 471284 1.539 1.417   1.368 1.315   completa
+       4 2026_10_16 459329 1.548 1.439   1.423 1.417 incompleta
+       4 2026_10_17 466635 1.271 1.277   1.160 1.100 incompleta
+       4 2026_10_18 476659 1.463 1.276   1.230 1.190 incompleta
+       4 2026_10_21 461216 1.846 1.658   1.433 1.283 incompleta
+       4 2026_10_29 420361 1.537 1.343   1.289 1.267 incompleta
+       5 2026_11_02 400424 1.666 1.561   1.481 1.413 incompleta
+       5 2026_11_03 455940 1.573 1.447   1.372 1.395 incompleta
+       5 2026_11_04 417260 1.610 1.496   1.343 1.277 incompleta
+       5 2026_11_05 431494 1.375 1.355   1.232 1.196   completa
+       5 2026_11_06 428625 1.465 1.415   1.308 1.243   completa
+
+A − B en MAE diario (negativo = A mejor). IC bootstrap por día; t pareado sobre días:
+  segmento      A      B  dias  dif_media_C  IC95_inf  IC95_sup       t  p_valor  dias_gana_A
+     todas   lgbm lineal    15      -0.0510   -0.0707   -0.0323 -4.9989   0.0002           14
+     todas lineal     B2    15      -0.0800   -0.1098   -0.0529 -5.2322   0.0001           14
+     todas   lgbm     B2    15      -0.1310   -0.1778   -0.0914 -5.6850   0.0001           15
+     todas     B2     B0    15      -0.1009   -0.1336   -0.0669 -5.7006   0.0001           13
+  completa   lgbm lineal     7      -0.0538   -0.0683   -0.0397 -6.6525   0.0006            7
+  completa lineal     B2     7      -0.0619   -0.0930   -0.0294 -3.5299   0.0124            6
+  completa   lgbm     B2     7      -0.1157   -0.1471   -0.0777 -5.8942   0.0011            7
+  completa     B2     B0     7      -0.0709   -0.1145   -0.0287 -2.9872   0.0244            6
+incompleta   lgbm lineal     8      -0.0486   -0.0843   -0.0166 -2.6361   0.0336            7
+incompleta lineal     B2     8      -0.0958   -0.1411   -0.0557 -4.0152   0.0051            8
+incompleta   lgbm     B2     8      -0.1443   -0.2248   -0.0784 -3.5571   0.0093            8
+incompleta     B2     B0     8      -0.1271   -0.1655   -0.0819 -5.4647   0.0009            7
+real 69.17
+user 171.76
+sys 16.72
+
+===== interpretar =====
+pliegue 3: 2,332,008 filas de prueba
+pliegue 4: 2,284,200 filas de prueba
+pliegue 5: 2,133,743 filas de prueba
+
+1. Ridge: enfriamiento nocturno -0.81 °C; peso de err_ult a 1/6/24/48 h: 0.31 / 0.10 / 0.06 / 0.03
+
+2. SHAP (|contribución| media, °C), 10 mayores:
+pendiente_pron    0.230
+viento_vel        0.150
+sesgo_ewma_30     0.150
+condicion         0.119
+prob_lluvia       0.115
+sesgo_ewma_20     0.112
+dep_rocio         0.106
+hora_solar_sin    0.093
+hora_solar_cos    0.078
+temp_anom         0.072
+   correlación por estación con su sesgo histórico: lat+lon r = 0.23 | sesgos exponenciales r = 0.78
+
+3. sesgo restante: amplitud del ciclo por hora (máx − mín) y dispersión entre estaciones (desvío de la media por estación), °C
+        amplitud_hora  desvío_entre_estaciones  media_de_las_horas
+B0              2.615                    0.494               0.048
+B2              0.487                    0.353               0.092
+lineal          0.409                    0.318               0.027
+lgbm            0.333                    0.325               0.048
+
+4. correlación con el error por horizonte:
+    err_ult  Ridge  LightGBM
+h                           
+1     0.518  0.627     0.646
+3     0.304  0.554     0.604
+6     0.074  0.502     0.561
+12   -0.029  0.475     0.534
+24    0.252  0.443     0.493
+36   -0.049  0.410     0.453
+48    0.165  0.368     0.395
+real 184.08
+user 854.86
+sys 26.37
+
+===== preparar_dashboard =====
+pliegue 1: 2,308,003 filas de prueba
+pliegue 2: 2,288,584 filas de prueba
+pliegue 3: 2,332,628 filas de prueba
+pliegue 4: 2,286,537 filas de prueba
+pliegue 5: 2,137,017 filas de prueba
+
+cobertura de la banda P10–P90 en los pliegues de reporte (esperado ~0,80):
+modelo  cobertura       n
+lineal      0.737 6756182
+  lgbm      0.750 6756182
+filas del dashboard: 6,756,182 | estaciones: 516
+real 220.63
+user 649.95
+sys 59.36

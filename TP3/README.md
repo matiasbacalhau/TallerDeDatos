@@ -4,8 +4,9 @@ Trabajo en curso de Matías Bacalhau. Consigna: `Consigna TP3.pdf`. Las decision
 justificación están en `DECISIONES.md` (se actualiza a medida que avanza el trabajo).
 
 ## Estado
-Hecho: preparación de datos, control de calidad con exclusión automática de días y alarmas, validación walk-forward, baselines (B0–B3) y feature engineering (familias 1–4).
-Hecho también: modelo interpretable (regresión lineal Ridge con curvas, variables por criterio meteorológico).
+Hecho: preparación de datos, control de calidad con exclusión automática de días y alarmas, validación walk-forward con pliegues anclados, baselines (B0–B3) y feature engineering (familias 1–8).
+Hecho también: experimentación por familias (`notebooks/experimentos.ipynb`), Ridge de caja de cristal con las familias que elige la regla de recorte y LightGBM con las 8 familias.
+**Pliegues anclados:** los bloques de prueba se cuentan desde el 30/09/2026, de a 5 días usables. Un día nuevo no cambia los pliegues anteriores; los modelos solo entrenan el pliegue que se completa (el resto sale de la caché, `data/cache/`). Los hiperparámetros se eligen una vez en los pliegues 1–2 y quedan congelados (`--reelegir` para volver a elegirlos).
 Pendiente: informe y presentación.
 
 ## Ver el dashboard (Etapa C)
@@ -48,8 +49,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/baselines.py          # baselines B0-B3 en los pliegues
 .venv/bin/python src/features.py           # variables por día (familias 1-4; la 5, vecinos, es experimental)
 .venv/bin/python src/verificar_features.py # controles de causalidad y recálculo independiente
-.venv/bin/python src/modelo_interpretable.py # elige el α del sesgo (pliegues 1-2) y reporta (3-4)
-.venv/bin/python src/modelo_lgbm.py         # elige grilla y árboles (pliegues 1-2) y reporta (3-4)
+.venv/bin/python -m pytest -q             # tests (pliegues, caché, Ridge, experimentación)
+.venv/bin/jupyter nbconvert --to notebook --execute --inplace notebooks/experimentos.ipynb   # elige las familias del Ridge
+.venv/bin/python src/modelo_interpretable.py # Ridge: elige α (pliegues 1-2, una vez) y reporta (3 en adelante)
+.venv/bin/python src/modelo_lgbm.py         # LightGBM: elige grilla y árboles (pliegues 1-2, una vez) y reporta
 .venv/bin/python src/comparar_modelos.py    # ¿las diferencias entre modelos superan el ruido?
 .venv/bin/python src/interpretar.py         # Etapa B: curvas, SHAP, sesgo restante y techo (figuras/)
 .venv/bin/python src/preparar_dashboard.py  # Etapa C: datos y bandas de confianza del dashboard
@@ -63,11 +66,15 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/validacion.py` — walk-forward con ventana expansiva y gap, cortes por día de la hora objetivo.
 - `src/baselines.py` — NWS crudo, sesgo global, sesgo por estación × hora solar, persistencia.
 - `src/features.py`, `src/verificar_features.py` — variables conocidas al emitir el pronóstico y su control.
-- `src/modelado.py`, `src/modelo_interpretable.py` — piezas comunes de los modelos y la regresión lineal con curvas.
-- `src/modelo_lgbm.py` — LightGBM con todas las features; compara contra B0, B2 y el modelo interpretable.
+- `src/modelado.py`, `src/modelo_interpretable.py` — piezas comunes de los modelos y el Ridge con curvas para cualquier lista de familias.
+- `src/cache.py` — caché por pliegue con huella del contenido de los datos.
+- `src/ridge_gram.py` — muchos Ridge (variantes × α) desde una sola XᵀX por pliegue.
+- `src/experimentos.py`, `notebooks/experimentos.ipynb` — experimentación por familias (exploración, ablación, regla de recorte); salidas en `salidas/experimentos/`.
+- `src/modelo_lgbm.py` — LightGBM con las 8 familias; compara contra B0, B2 y el Ridge.
 - `src/comparar_modelos.py` — prueba de significancia entre modelos con el día de prueba como unidad.
 - `src/interpretar.py` — Etapa B: figuras de interpretación en `figuras/`.
 - `src/preparar_dashboard.py`, `app/dashboard.py`, `.streamlit/config.toml` — Etapa C: dashboard de confianza del pronóstico.
-- Experimento con vecinos: `--vecinos` en `modelo_interpretable.py`, `modelo_lgbm.py` y `comparar_modelos.py` (salidas `*_exp_vecinos`).
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
-- `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación, α del sesgo exponencial).
+- `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación y ancla de los pliegues, corte y umbrales de los experimentos, familias del Ridge).
+- `tests/` — tests con pytest.
+- `salidas/` — salida en pantalla del pipeline y de los modelos finales (versionadas).

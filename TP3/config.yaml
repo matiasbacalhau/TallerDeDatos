@@ -31,7 +31,7 @@ calidad:                             # exclusión automática de días (acordado
 modelos:                             # decisiones del 10/11/2026 (ver DECISIONES.md, Etapa A — Modelos)
   max_filas_entrenamiento: 2000000   # submuestra aleatoria (semilla) del entrenamiento de cada pliegue
   interpretable:                     # Ridge con curvas; familias según la experimentación (17/11/2026)
-    familias: [base, pendiente, rezagos, sesgo_ewma, vecinos, revision, rezagos_extra, dinamica]
+    familias: [base, pendiente, rezagos, sesgo_ewma, revision]   # salen vecinos, rezagos_extra y dinamica (notebooks/experimentos.ipynb)
     ridge_alphas: [1.0, 1.0e2, 1.0e3, 1.0e4, 1.0e5, 1.0e6, 1.0e7]   # grilla de α (pliegues de elección)
     max_filas: 1000000               # submuestra del entrenamiento (la matriz es ancha; 8 GB de RAM)
     umbral_calma_kmh: 10             # enfriamiento nocturno: viento pronosticado < 10 km/h (~3 m/s)
