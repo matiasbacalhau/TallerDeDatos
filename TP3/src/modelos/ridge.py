@@ -25,7 +25,7 @@ Columnas por familia:
 
 Pasos (main):
   1. En los pliegues de elección se elige la penalización α (una sola vez; queda congelada en
-     interpretable_hiperparametros.json). Se vuelve a elegir si cambian las familias o con --reelegir.
+     salidas/ridge/hiperparametros.json). Se vuelve a elegir si cambian las familias o con --reelegir.
   2. Con ese α se entrena y se evalúa cada pliegue de reporte, contra B0 y B2, por segmento. Cada pliegue queda
      en la caché (data/cache/ridge/): si sus datos no cambiaron, no se vuelve a entrenar.
 
@@ -46,10 +46,11 @@ from sklearn.preprocessing import SplineTransformer, StandardScaler
 
 import cache
 from formato import dec, n as n_
-from modelado import CFG, RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, RAIZ, SALIDAS, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
 from ridge_gram import Gram
 
 P = CFG["modelos"]["interpretable"]
+SALIDA = SALIDAS / "ridge"                     # resultados de este modelo
 VERSION = 2                                   # cambia si cambia la forma de la matriz (invalida la caché)
 FAMILIAS = json.loads((RAIZ / "data" / "features" / "familias.json").read_text())
 TODAS = list(FAMILIAS)
@@ -274,13 +275,13 @@ def pliegue_reporte(k, tr, te, familias, alpha, max_filas):
 
 # --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------
 COLUMNA = "lineal"                                  # nombre del modelo en evaluar() y en los CSV de resultados
-REPORTE = RAIZ / "data" / "resultados" / "interpretable_por_pliegue.csv"
+REPORTE = SALIDA / "por_pliegue.csv"
 
 
 def hiperparametros_producto():
     """Los hiperparámetros congelados, si se eligieron con los pliegues de elección actuales."""
     eleccion, _ = pliegues_eleccion_reporte()
-    hp = hiperparametros_vigentes(RAIZ / "data" / "resultados" / "interpretable_hiperparametros.json",
+    hp = hiperparametros_vigentes(SALIDA / "hiperparametros.json",
                                   list(P["familias"]), fechas_eleccion(eleccion))
     if hp is None:
         raise RuntimeError("faltan los hiperparámetros del Ridge o son viejos: correr src/modelos/ridge.py")
@@ -299,10 +300,10 @@ def predecir_producto(modelo, df):
 
 
 def main():
-    salida = RAIZ / "data" / "resultados"
-    salida.mkdir(exist_ok=True)
+    salida = SALIDA
+    salida.mkdir(parents=True, exist_ok=True)
     familias, max_filas = list(P["familias"]), P["max_filas"]
-    ruta_hp = salida / "interpretable_hiperparametros.json"
+    ruta_hp = salida / "hiperparametros.json"
     eleccion, reporte = pliegues_eleccion_reporte()
     print("Modelo de caja de cristal (Ridge con curvas). Familias que usa:", ", ".join(familias))
     print(f"Pliegues que eligen la penalización: {[k for k, _ in eleccion]} · pliegues que reportan: {[k for k, _ in reporte]}")
@@ -311,8 +312,8 @@ def main():
     if hp is None:
         print("\nEligiendo la penalización α en los pliegues de elección (criterio: MAE con historia completa)...", flush=True)
         G, alpha, sel = elegir_alpha(familias, eleccion, max_filas)
-        G.to_csv(salida / "interpretable_grilla_alpha.csv", index=False)
-        sel.to_csv(salida / "interpretable_eleccion.csv", index=False)
+        G.to_csv(salida / "grilla_alpha.csv", index=False)
+        sel.to_csv(salida / "eleccion.csv", index=False)
         print("  α          MAE medio (°C)")
         for a_, m_ in G.groupby("alpha")["MAE"].mean().items():
             print(f"  {a_:<10.0e} {dec(m_, 4)}" + ("   ← elegido" if a_ == alpha else ""))
@@ -334,9 +335,9 @@ def main():
         print(f"pliegue {k}: " + ("leído de la caché" if de_cache else
               f"entrenado con {n_(res['filas_entrenamiento'])} filas en {time.time() - t0:.0f} s"), flush=True)
     R = pd.DataFrame(filas)
-    R.to_csv(salida / "interpretable_por_pliegue.csv", index=False)
-    pd.concat(coefs, axis=1).to_csv(salida / "interpretable_coeficientes.csv")      # solo números (lo leen notebooks)
-    pd.Series(fam_de, name="familia").rename_axis("columna").to_csv(salida / "interpretable_familia_de_columna.csv")
+    R.to_csv(salida / "por_pliegue.csv", index=False)
+    pd.concat(coefs, axis=1).to_csv(salida / "coeficientes.csv")      # solo números (lo leen notebooks)
+    pd.Series(fam_de, name="familia").rename_axis("columna").to_csv(salida / "familia_de_columna.csv")
 
     print("\nMAE en °C de la temperatura corregida (más bajo es mejor), promedio de los pliegues de reporte.")
     print("B0 = NWS sin corregir; B2 = error medio de la estación a esa hora; lineal = este modelo.")
@@ -350,8 +351,7 @@ def main():
         print(f"  {'horizonte':<10}" + "".join(f"{c:>9}" for c in ("B0", "B2", "lineal")))
         for h in ["todos", "1", "3", "6", "12", "24", "48"]:
             print(f"  {h + ('' if h == 'todos' else ' h'):<10}" + "".join(f"{dec(t.loc[h, c], 3):>9}" for c in ("B0", "B2", "lineal")))
-    print("\nResultados: data/resultados/interpretable_por_pliegue.csv, interpretable_coeficientes.csv, "
-          "interpretable_familia_de_columna.csv")
+    print("\nResultados en salidas/ridge/: por_pliegue.csv, coeficientes.csv, familia_de_columna.csv")
 
 
 if __name__ == "__main__":

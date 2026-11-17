@@ -245,7 +245,7 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
 
 ### Experimento: modelo explicativo OLS con selección por RFE (17/11/2026, rama `tp3-ols-rfe`)
 
-Segundo modelo de caja de cristal, independiente del Ridge. Código: `src/modelos/ols_rfe.py`. Lectura: `notebooks/rfe_ols.ipynb`. Salidas: `salidas/rfe/`.
+Segundo modelo de caja de cristal, independiente del Ridge. Código: `src/modelos/ols_rfe.py`. Lectura: `notebooks/rfe_ols.ipynb`. Salidas: `salidas/ols_rfe/`.
 
 - **Qué cambia:** solo el método. El dataset y la matriz de diseño son los mismos (`Disenio` con las 8 familias). LightGBM, `features.py` y el Ridge del producto no se tocan.
 - **Independencia del Ridge:** no se usan su α, su ablación ni sus 5 familias. Los resultados del Ridge y de LightGBM se leen recién en la tabla final.
@@ -281,6 +281,7 @@ Segundo modelo de caja de cristal, independiente del Ridge. Código: `src/modelo
 - **Producto:** `config.yaml` (`producto.modelo`) dice cuál es. Lo decide el grupo con `notebooks/comparacion_modelos.ipynb`. Hoy es **LightGBM**, el de menor error.
 - `src/producto.py`, paso 7 del pipeline, entrena el producto con todos los días usables y lo guarda en `data/producto/` con su ficha (hiperparámetros, días, MAE de reporte). No elige nada: si faltan los hiperparámetros congelados o son viejos, se detiene y dice qué script experimental correr.
 - Cambiar de producto es cambiar una línea de `config.yaml`, sin tocar código. Todos los modelos tienen la misma interfaz (`src/modelos/__init__.py`).
+- **Salidas por modelo:** cada modelo escribe todo lo suyo en `salidas/<modelo>/` (`ridge/`, `lgbm/`, `ols_rfe/`), versionado: hiperparámetros congelados, elección, métricas por pliegue, coeficientes o importancias y modelos. Los experimentos viejos (`--todas`, `--vecinos`) van en `salidas/<modelo>/historico/`. Lo común (baselines, comparación, interpretación) queda en `data/resultados/`. Los nombres de archivo de la tabla de abajo (`interpretable_*`, `lgbm_*`) ahora están sin el prefijo, dentro de la carpeta de su modelo.
 
 ### Decisiones de implementación y su costo (17/11/2026)
 

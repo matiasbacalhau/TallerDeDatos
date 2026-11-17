@@ -1,0 +1,5 @@
+pliegue,segmento,horizonte,modelo,n,MAE,RMSE,sesgo,alpha
+1,todas,todos,lineal,2240695,1.2631683349609375,1.6305903196334839,los 4 (lineales),100000.0
+1,completa,todos,lineal,2240695,1.2631683349609375,1.6305903196334839,los 4 (lineales),100000.0
+2,todas,todos,lineal,2287118,1.2299413681030273,1.5895776748657227,los 4 (lineales),100000.0
+2,completa,todos,lineal,2287118,1.2299413681030273,1.5895776748657227,los 4 (lineales),100000.0

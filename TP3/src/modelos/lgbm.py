@@ -9,11 +9,11 @@ Regla (DECISIONES.md, Etapa A — Modelos):
   1. En la primera mitad de los pliegues se elige una combinación de una grilla chica (hojas × objetivo)
      y la cantidad de árboles (cortes cada PASO_ARBOLES), por MAE con historia completa.
   2. Con eso fijo se reentrena en cada pliegue de la segunda mitad y se reporta contra B0, B2 y el
-     modelo interpretable (si ya se corrió: se lee de data/resultados/interpretable_por_pliegue.csv).
+     modelo interpretable (si ya se corrió: se lee de salidas/ridge/por_pliegue.csv).
 
 Recibe SIEMPRE las 8 familias (17/11/2026): la pregunta del producto es si una caja negra con toda la información
 es sustancialmente mejor que el Ridge regularizado de caja de cristal. Los hiperparámetros se eligen una sola vez
-(quedan congelados en lgbm_hiperparametros.json; --reelegir los vuelve a elegir) y cada pliegue de reporte queda
+(quedan congelados en salidas/lgbm/hiperparametros.json; --reelegir los vuelve a elegir) y cada pliegue de reporte queda
 en la caché (data/cache/lgbm/): si sus datos no cambiaron, no se vuelve a entrenar.
 
 Uso:  .venv/bin/python src/modelos/lgbm.py [--reelegir]
@@ -33,10 +33,11 @@ import pandas as pd
 
 import cache
 from formato import dec, n as n_
-from modelado import CFG, RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, RAIZ, SALIDAS, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
 from modelos.ridge import CONDICIONES, FAMILIAS, TODAS, fechas_eleccion
 
 P = CFG["modelos"]["lgbm"]
+SALIDA = SALIDAS / "lgbm"                      # resultados de este modelo
 VERSION = 2
 X_COLS = [c for cols in FAMILIAS.values() for c in cols]
 COLUMNAS = ["station_id", "target_time_utc", "error_c", "obs_interpolada"] + X_COLS
@@ -109,13 +110,13 @@ def pliegue_reporte(k, tr, te, params, n_arb):
 
 # --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------
 COLUMNA = "lgbm"
-REPORTE = RAIZ / "data" / "resultados" / "lgbm_por_pliegue.csv"
+REPORTE = SALIDA / "por_pliegue.csv"
 
 
 def hiperparametros_producto():
     """Los hiperparámetros congelados, si se eligieron con los pliegues de elección actuales."""
     eleccion, _ = pliegues_eleccion_reporte()
-    ruta = RAIZ / "data" / "resultados" / "lgbm_hiperparametros.json"
+    ruta = SALIDA / "hiperparametros.json"
     hp = json.loads(ruta.read_text()) if ruta.exists() else {}
     if hp.get("familias") != TODAS or hp.get("pliegues_eleccion_fechas") != fechas_eleccion(eleccion):
         raise RuntimeError("faltan los hiperparámetros de LightGBM o son viejos: correr src/modelos/lgbm.py")
@@ -134,9 +135,9 @@ def predecir_producto(modelo, df):
 
 
 def main():
-    salida = RAIZ / "data" / "resultados"
-    salida.mkdir(exist_ok=True)
-    ruta_hp = salida / "lgbm_hiperparametros.json"
+    salida = SALIDA
+    salida.mkdir(parents=True, exist_ok=True)
+    ruta_hp = salida / "hiperparametros.json"
     eleccion, reporte = pliegues_eleccion_reporte()
     print(f"LightGBM con las 8 familias ({len(X_COLS)} variables). Pliegues que eligen: {[k for k, _ in eleccion]} · "
           f"pliegues que reportan: {[k for k, _ in reporte]}", flush=True)
@@ -146,7 +147,7 @@ def main():
         print(f"\nEligiendo hiperparámetros: {len(GRILLA)} combinaciones × cortes de {CORTES[0]} a {CORTES[-1]} árboles "
               "(criterio: MAE con historia completa)...", flush=True)
         G, crit, params, n_arb = elegir(eleccion)
-        G.to_csv(salida / "lgbm_eleccion.csv", index=False)
+        G.to_csv(salida / "eleccion.csv", index=False)
         print("  las 5 mejores:   combinación                      árboles   MAE medio (°C)")
         for (conf, n), v in crit.head(5).items():
             print(f"                  {conf:<32} {n:>7}   {dec(v, 4)}")
@@ -164,16 +165,16 @@ def main():
         res, de_cache = pliegue_reporte(k, tr, te, params, n_arb)
         filas += res["filas"]
         imp.append(res["importancia"])
-        (salida / f"lgbm_pliegue_{k}.txt").write_text(res["modelo"])
+        (salida / f"pliegue_{k}.txt").write_text(res["modelo"])
         print(f"pliegue {k}: " + ("leído de la caché" if de_cache else
               f"entrenado con {n_(res['filas_entrenamiento'])} filas en {time.time() - t0:.0f} s"), flush=True)
     R = pd.DataFrame(filas)
-    R.to_csv(salida / "lgbm_por_pliegue.csv", index=False)
+    R.to_csv(salida / "por_pliegue.csv", index=False)
     I = pd.concat(imp, axis=1)
     I = I / I.sum()                                         # fracción de la ganancia total por pliegue
-    I.to_csv(salida / "lgbm_importancia.csv")
+    I.to_csv(salida / "importancia.csv")
 
-    lin = salida / "interpretable_por_pliegue.csv"
+    lin = SALIDAS / "ridge" / "por_pliegue.csv"
     if lin.exists():
         L = pd.read_csv(lin)
         R = pd.concat([R.astype({"horizonte": str}), L[L.modelo == "lineal"].astype({"horizonte": str})], ignore_index=True)

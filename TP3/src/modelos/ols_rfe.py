@@ -41,7 +41,7 @@ import modelos.ridge as MI
 from modelado import RAIZ, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte
 from ridge_gram import Gram
 
-SALIDA = RAIZ / "salidas" / "rfe"
+SALIDA = RAIZ / "salidas" / "ols_rfe"
 TOL_AUTOVALOR = 1e-10                      # autovalores < TOL · máximo se tratan como 0 (colinealidad exacta)
 PROPIAS = {"enfriamiento_nocturno": "base", "hora_solar": "base"}     # variables que arma Disenio, no features.py
 
@@ -162,9 +162,9 @@ def curvas(dis, coef, variables, puntos=60):
 
 def pesos_ridge():
     """Peso por variable (misma medida que RFE) del Ridge del producto en los pliegues de reporte, para comparar
-    cuán concentrado está cada modelo. Lee los coeficientes del Ridge (data/resultados) recién acá, al final.
+    cuán concentrado está cada modelo. Lee los coeficientes del Ridge (salidas/ridge) recién acá, al final.
     Sus columnas son un subconjunto de la matriz de 8 familias con el mismo escalado (misma submuestra y semilla)."""
-    B = pd.read_csv(RAIZ / "data" / "resultados" / "interpretable_coeficientes.csv", index_col=0)
+    B = pd.read_csv(MI.SALIDA / "coeficientes.csv", index_col=0)
     _, reporte = pliegues_eleccion_reporte()
     filas = []
     for k, (tr, te) in reporte:
@@ -176,7 +176,7 @@ def pesos_ridge():
         vivas = sorted(set(v[coef != 0]))
         filas += [{"pliegue": k, "variable": x, "peso_C": p} for x, p in pesos(g, n, coef, v, vivas).items()]
         print(f"  pliegue {k}: {len(vivas)} variables del Ridge", flush=True)
-    pd.DataFrame(filas).to_csv(SALIDA / "pesos_ridge.csv", index=False)
+    pd.DataFrame(filas).to_csv(MI.SALIDA / "pesos_por_variable.csv", index=False)
 
 
 # --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------

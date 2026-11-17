@@ -16,6 +16,7 @@ from validacion import CFG as CFG_VAL, dias_disponibles, dias_historia_incomplet
 RAIZ = Path(__file__).resolve().parents[1]
 CFG = yaml.safe_load((RAIZ / "config.yaml").read_text())
 FEAT_DIR = RAIZ / "data" / "features"
+SALIDAS = RAIZ / "salidas"                       # salidas/<modelo>/: resultados de cada modelo (versionados)
 SEMILLA = CFG["semilla"]
 HORIZONTES_REPORTE = (1, 3, 6, 12, 24, 48)
 def pliegues_eleccion_reporte(hasta=None):

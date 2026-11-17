@@ -1,0 +1,1 @@
+{"ridge_alpha": 100000.0, "ridge_alphas_todas": [1.0, "1.0e4", "1.0e5", "1.0e6", "1.0e7"], "max_filas_todas": 1000000, "umbral_calma_kmh": 10, "sesgo": null}

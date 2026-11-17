@@ -73,7 +73,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/modelos/` — **parte experimental**, un archivo por tipo de modelo, todos con la misma interfaz de producto:
   - `ridge.py` — Ridge con curvas para cualquier lista de familias (caja de cristal).
   - `lgbm.py` — LightGBM con las 8 familias; compara contra B0, B2 y el Ridge.
-  - `ols_rfe.py` — OLS sin penalización con variables elegidas por RFE (caja de cristal); salidas en `salidas/rfe/`.
+  - `ols_rfe.py` — OLS sin penalización con variables elegidas por RFE (caja de cristal); salidas en `salidas/ols_rfe/`.
 - `src/producto.py` — **producto**: entrena con todos los días el modelo que dice `config.yaml` (`producto.modelo`) y lo guarda con su ficha en `data/producto/`.
 - `src/cache.py` — caché por pliegue con huella del contenido de los datos.
 - `src/ridge_gram.py` — muchos Ridge (variantes × α) desde una sola XᵀX por pliegue.
@@ -84,4 +84,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación y ancla de los pliegues, corte y umbrales de los experimentos, familias del Ridge, modelo producto).
 - `tests/` — tests con pytest.
-- `salidas/` — salida en pantalla del pipeline y de los modelos finales (versionadas).
+- `salidas/` — versionadas:
+  - `salidas/<modelo>/` (`ridge/`, `lgbm/`, `ols_rfe/`) — todo lo de cada modelo: hiperparámetros congelados, elección, métricas por pliegue, coeficientes o importancias y modelos; `historico/` guarda los experimentos viejos (`--todas`, `--vecinos`).
+  - `salidas/experimentos/` — experimentación por familias.
+  - salida en pantalla del pipeline y de los modelos finales (`*.txt`).
+- `data/resultados/` — resultados comunes a todos los modelos (baselines, comparación, interpretación); no versionado.

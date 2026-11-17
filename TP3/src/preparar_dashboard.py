@@ -26,7 +26,6 @@ import modelos.ridge as MI
 import modelos.lgbm as ML
 from modelado import RAIZ, cargar_entrenamiento, dias_historia_incompleta, hora_solar, pliegues_eleccion_reporte, cargar_prueba
 
-RES = RAIZ / "data" / "resultados"
 SALIDA = RAIZ / "app" / "datos"
 T0 = pd.Timestamp("2026-01-01", tz="UTC")       # origen de la hora objetivo en filas.parquet
 TRAMOS = [(1, 3), (4, 6), (7, 12), (13, 24), (25, 36), (37, 48)]
@@ -97,8 +96,8 @@ def aplicar(D, B):
 
 def main():
     SALIDA.mkdir(parents=True, exist_ok=True)
-    hp_lin = json.loads((RES / "interpretable_hiperparametros.json").read_text())
-    hp_gbm = json.loads((RES / "lgbm_hiperparametros.json").read_text())
+    hp_lin = json.loads((MI.SALIDA / "hiperparametros.json").read_text())
+    hp_gbm = json.loads((ML.SALIDA / "hiperparametros.json").read_text())
     eleccion, reporte = pliegues_eleccion_reporte()
 
     C = predecir(eleccion, hp_lin, hp_gbm)

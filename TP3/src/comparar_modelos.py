@@ -1,6 +1,6 @@
 """¿Las diferencias de error entre modelos son mayores que el ruido? (pliegues de reporte)
 
-Reentrena los dos modelos con los hiperparámetros ya elegidos (data/resultados/*_hiperparametros.json) en
+Reentrena los dos modelos con los hiperparámetros ya elegidos (salidas/<modelo>/hiperparametros.json) en
 cada pliegue de reporte y compara el MAE POR DÍA de prueba.
 
 Unidad de la prueba: el DÍA. Dentro de un día los errores de las estaciones y de los horizontes están muy
@@ -11,7 +11,7 @@ independiente daría p-valores falsamente chicos. Con D_d = MAE_A(d) − MAE_B(d
   - intervalo bootstrap del 95 % remuestreando días;
   - cuántos días gana cada modelo.
 
-Usa los hiperparámetros congelados y los modelos LightGBM ya entrenados (data/resultados/lgbm_pliegue_k.txt).
+Usa los hiperparámetros congelados y los modelos LightGBM ya entrenados (salidas/lgbm/pliegue_k.txt).
 Las predicciones por día de cada pliegue quedan en la caché (data/cache/comparacion/).
 
 Uso:  .venv/bin/python src/comparar_modelos.py
@@ -34,14 +34,13 @@ N_BOOT = 10000
 
 
 def predicciones_por_dia(reporte):
-    res_dir = RAIZ / "data" / "resultados"
-    hp_lin = json.loads((res_dir / "interpretable_hiperparametros.json").read_text())
-    hp_gbm = json.loads((res_dir / "lgbm_hiperparametros.json").read_text())
+    hp_lin = json.loads((MI.SALIDA / "hiperparametros.json").read_text())
+    hp_gbm = json.loads((ML.SALIDA / "hiperparametros.json").read_text())
     fams, alpha = hp_lin["familias"], hp_lin["ridge_alpha"]
     columnas = list(dict.fromkeys(MI.columnas_de(fams) + ML.COLUMNAS))
     filas = []
     for k, (tr, te) in reporte:
-        modelo_gbm = (res_dir / f"lgbm_pliegue_{k}.txt").read_text()
+        modelo_gbm = (ML.SALIDA / f"pliegue_{k}.txt").read_text()
         clave = MI.clave_pliegue("comparacion", fams, alpha, tr, te, MI.P["max_filas"])
         clave = cache.clave(base=clave, lgbm=modelo_gbm)
         agg = cache.leer("comparacion", clave)

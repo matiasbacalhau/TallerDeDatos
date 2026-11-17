@@ -195,7 +195,7 @@ def main():
     estilo()
     rng = np.random.default_rng(SEMILLA)
     _, reporte = pliegues_eleccion_reporte()
-    hp_lin = json.loads((RES / "interpretable_hiperparametros.json").read_text())
+    hp_lin = json.loads((MI.SALIDA / "hiperparametros.json").read_text())
     columnas = list(dict.fromkeys(MI.columnas_de(hp_lin["familias"]) + ML.COLUMNAS))
     acc = Acumulador()
     for j, (k, (tr, te)) in enumerate(reporte):
@@ -204,7 +204,7 @@ def main():
         T = T[T["B2"].notna()].reset_index(drop=True)
         dis, m = MI.ajustar(cargar_entrenamiento(tr, MI.columnas_de(hp_lin["familias"]), MI.P["max_filas"]),   # la submuestra del Ridge
                              hp_lin["familias"], hp_lin["ridge_alpha"])
-        gbm = lgb.Booster(model_file=str(RES / f"lgbm_pliegue_{k}.txt"))
+        gbm = lgb.Booster(model_file=str(ML.SALIDA / f"pliegue_{k}.txt"))
         pred = {"B0": np.zeros(len(T)), "B2": T["B2"].to_numpy(), "lineal": MI.predecir(dis, m.coef_, m.intercept_, T),
                 "lgbm": gbm.predict(ML.matriz(T))}
         acc.agregar(T, pred)
