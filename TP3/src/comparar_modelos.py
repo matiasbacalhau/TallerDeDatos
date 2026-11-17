@@ -34,10 +34,12 @@ def predicciones_por_dia(reporte):
     columnas = list(dict.fromkeys(MI.COLUMNAS + ML.COLUMNAS))
     filas = []
     for k, (tr, te) in reporte:
-        A = cargar_entrenamiento(tr, columnas, MI.P["max_filas_todas"] if MI.EXP_TODAS else None)
+        A = cargar_entrenamiento(tr, columnas)
+        # con --todas el Ridge entrena con su submuestra más chica (la misma que en modelo_interpretable.py)
+        A_lin = cargar_entrenamiento(tr, MI.COLUMNAS, MI.P["max_filas_todas"]) if MI.EXP_TODAS else A
         T = preparar_prueba(te, tr, columnas)
         T = T[T["B2"].notna()].reset_index(drop=True)           # mismas filas que evaluar()
-        dis, m = MI.ajustar(A, hp_lin["sesgo"], hp_lin["ridge_alpha"])
+        dis, m = MI.ajustar(A_lin, hp_lin["sesgo"], hp_lin["ridge_alpha"])
         pred = {"B0": np.zeros(len(T)), "B2": T["B2"].to_numpy(), "lineal": m.predict(dis.transform(T)),
                 "lgbm": ML.entrenar(A, params, hp_gbm["arboles"]).predict(ML.matriz(T))}
         e = T["error_c"].to_numpy()

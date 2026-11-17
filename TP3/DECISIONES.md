@@ -321,7 +321,19 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
     - **Penalización:** con α = 1 y unos 10⁶ filas estandarizadas, el Ridge prácticamente no penaliza, porque cada columna aporta del orden de n a `X'X`. Por eso en este modo se elige α de la grilla `ridge_alphas_todas` (1 a 10⁷) en los pliegues 1–2. Así achica los coeficientes de lo que no aporta.
     - **Filas:** entrena con 10⁶ filas (`max_filas_todas`) por memoria: la matriz tiene unas 156 columnas.
 - **Corrección:** antes de este cambio, `--rezagos` no le sumaba ninguna columna al Ridge. Ahora le suma la familia 7.
-- **Resultado (pliegues 3–4):** pendiente.
+- **Resultado (pliegues 3–4, MAE en °C):**
+
+  | Segmento | Ridge producto → todas | LightGBM producto → todas |
+  |---|---|---|
+  | completa | 1,402 → 1,425 | 1,382 → 1,375 |
+  | incompleta | 1,301 → 1,308 | 1,267 → 1,250 |
+  | todas | 1,352 → **1,367** | 1,325 → **1,313** |
+
+  - **LightGBM:** −0,9 %, concentrado en horizontes cortos (−5,4 % a 1 h, −2,4 % a 6 h; nada a 24–48 h). Día como unidad: −0,012 °C, mejora 6 de 10 días, p = 0,12 (IC95 −0,026 a 0,000). Las familias nuevas se llevan ~13 % de la ganancia.
+  - **Ridge:** +1,1 %, mejora 2 de 10 días (p = 0,08). α elegido = 10⁵, en el interior de la grilla (con α = 1 la elección daba 1,273 contra 1,246). Mejora a 1 h y empeora a 24–48 h: los términos lineales sobre columnas crudas no generalizan entre ventanas.
+  - Dentro de `--todas`, LightGBM le gana al Ridge 10 de 10 días (p = 0,002), pero porque el Ridge empeoró.
+- **Decisión:** no entra al producto. LightGBM no mejora de forma significativa y el Ridge empeora. Pendiente: correr cada familia por separado para ver cuál explica la mejora de LightGBM a 1 h.
+- **Comparación:** sección 14 de `notebooks/comparacion_modelos.ipynb`. `comparar_modelos.py --todas` entrena cada modelo con su propia submuestra (Ridge 10⁶, LightGBM 2·10⁶ filas).
 
 ### Dirección del viento (10/11/2026)
 
