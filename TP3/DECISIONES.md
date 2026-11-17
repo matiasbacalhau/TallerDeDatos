@@ -1,101 +1,106 @@
-# TP3 — Registro de decisiones
+# TP3 — Registro de decisiones (rama `tp3-experimentos`)
 
 Se actualiza a medida que el grupo decide. Sirve de base para el informe y la defensa.
+
+En esta rama el TP3 se corrió **desde cero** con 55 días (10/09 → 09/11/2026). Quedan las decisiones tomadas en `main` que siguen valiendo acá; los resultados y las decisiones que solo valían para el trabajo hecho en `main` (35 y 47 días, 4 pliegues, Ridge con variables elegidas a mano, experimentos con banderas) no están. Todos los números son de esta rama.
 
 ## Paso 0 — Datos (2/11/2026)
 
 | # | Decisión | Elegido | Por qué / evidencia |
 |---|---|---|---|
-| 1 | Dataset | El del grupo: 35 CSV diarios de `../archivos/` (10/9 → 14/10) | La consigna pide el «dataset fusionado del TP1». |
+| 1 | Dataset | El del grupo: CSV diarios de `../archivos/` (55 días, 10/09 → 09/11) | La consigna pide el «dataset fusionado del TP1». |
 | 2 | Variable objetivo | Temperatura, `error_c = observado − pronosticado` | Es la variable del TP2. |
-| 3 | Horizontes | Los 48 (1–48 h) | Decisión del grupo; 20,7 M de filas. Para la búsqueda de hiperparámetros se submuestrea. |
-| 4 | Observación faltante | Interpolación lineal en el tiempo si el hueco dura ≤ 3 h; cada valor interpolado queda marcado (`obs_interpolada`) | Prueba de ocultamiento sobre lecturas reales: error absoluto medio 0,43 °C (hueco de 1 h), 0,55 (2 h), 0,71 (3 h). Recupera el 10,5 % de las estación-hora; queda 17,7 % sin dato. |
-| 5 | Evaluación | Baselines: se evalúan con filas reales e interpoladas. Modelos interpretable y de mínimo error: se entrenan con ambas y se evalúan **solo en filas reales**. La tabla final compara todo sobre filas reales | Las métricas no dependen de valores estimados. |
+| 3 | Horizontes | Los 48 (1–48 h) | Decisión del grupo; 32,6 M de filas. Para entrenar se submuestrea. |
+| 4 | Observación faltante | Interpolación lineal en el tiempo si el hueco dura ≤ 3 h; cada valor interpolado queda marcado (`obs_interpolada`) | Prueba de ocultamiento sobre lecturas reales (hecha con 35 días): error absoluto medio 0,43 °C (hueco de 1 h), 0,55 (2 h), 0,71 (3 h). Con 55 días: 62,1 % de las estación-hora con lectura real, 11,0 % interpoladas, 26,9 % sin dato. |
+| 5 | Evaluación | Baselines: se evalúan con filas reales e interpoladas. Modelos: se entrenan con ambas y se evalúan **solo en filas reales**. La tabla final compara todo sobre filas reales | Las métricas no dependen de valores estimados. |
 
 Resultado: `data/pares/*.parquet` (formato largo: una fila por estación × hora objetivo × horizonte), generado con `src/preparar_datos.py`.
 
-## Etapa A — Variables (en curso)
+## Etapa A — Variables
 
-- **Restricción de causalidad (lógica, no negociable):** un error rezagado solo puede usarse si se observó a una distancia ≥ horizonte respecto de la hora objetivo, es decir, hasta la emisión (`forecast_generated_at_utc`). Se verificará con una prueba automática.
-- **Ventanas de rezagos elegidas con nuestros datos.** Autocorrelación del error del pronóstico a 24 h (por estación, sin el sesgo medio, solo observaciones reales; 35 días, 840 horas por estación):
+- **Restricción de causalidad (lógica, no negociable):** un error rezagado solo puede usarse si se observó a una distancia ≥ horizonte respecto de la hora objetivo, es decir, hasta la emisión (`forecast_generated_at_utc`). Lo controla una prueba automática en cada corrida.
+- **Ventanas de rezagos elegidas con los datos.** Autocorrelación del error del pronóstico a 24 h (por estación, sin el sesgo medio, solo observaciones reales; medida con 35 días, 840 horas por estación):
 
   | Distancia | 1 h | 2 h | 3 h | 6 h | 9 h | 12 h | 18 h | 24 h | 36 h | 48 h |
   |---|---|---|---|---|---|---|---|---|---|---|
   | Autocorr. | 0,84 | 0,69 | 0,54 | 0,19 | −0,03 | −0,10 | 0,06 | 0,35 | −0,15 | 0,24 |
 
-  Persistencia real de unas 6 h; los picos a 24 y 48 h son una interpretación (ciclo diario del error), no comprobada. Cada ventana debe justificarse además por una ablación en validación.
-- **Sesgo persistente de la estación:** promedio exponencial de días (como el decaying average del NBM del NWS); α a calibrar en validación porque solo hay 35 días.
+  Persistencia real de unas 6 h; los picos a 24 y 48 h son una interpretación (ciclo diario del error), no comprobada. Cada familia se justifica además con la ablación de la experimentación.
+- **Sesgo persistente de la estación:** promedio exponencial de días (como el decaying average del NBM del NWS) con 4 memorias (α = 0,05, 0,1, 0,2 y 0,3). Los dos modelos reciben los 4; el Ridge los pondera con su penalización.
 
-## Etapa A — Validación (2/11/2026)
+## Etapa A — Validación
 
-- **Walk-forward (expanding window) con gap**, sin bloque final reservado (decisión del grupo; se explicó que así todo el período se usa para elegir y no queda una prueba limpia).
+- **Walk-forward (expanding window) con gap**, sin bloque final reservado (decisión del grupo, 2/11; así todo el período se usa para elegir y no queda una prueba limpia).
 - Cortes por **día de la hora objetivo**, nunca por filas sueltas: cada hora objetivo aparece hasta 48 veces (una por horizonte) con la misma observación.
-- Parámetros en `config.yaml` (`validacion:`): hoy 4 pliegues, bloques de 5 días, gap de 2 días y mínimo de 10 días de entrenamiento. Con más de 60 días: subir a 5–6 pliegues y bloques de 7 días.
-- Código: `src/validacion.py` (`pliegues_walk_forward`, `verificar`). Con los 35 días actuales: entrenamiento de 13, 18, 23 y 28 días, y pruebas del 25/9–29/9, 30/9–4/10, 5/10–9/10 y 10/10–14/10.
-- **Pendiente:** al llegar a hiperparámetros, decidir cómo evitar optimismo al elegir y reportar sobre los mismos pliegues (p. ej. elegir con los primeros pliegues y reportar el último).
+- **Pliegues anclados al calendario (17/11):** los bloques de prueba se cuentan desde el 30/09/2026, de a 5 días usables (no excluidos). Un día nuevo no cambia los pliegues anteriores: aparece un pliegue nuevo cuando se completa un bloque. Gap de 2 días de calendario y mínimo de 10 días de entrenamiento (`config.yaml` → `validacion:`).
+- Con los 55 días: 5 pliegues. Los pliegues 1–2 eligen hiperparámetros (pruebas 30/09–04/10 y 05/10–09/10) y los 3–5 reportan (10/10–14/10; 16, 17, 18, 21 y 29/10; 02/11–06/11). Los días 07–09/11 esperan a completar un bloque.
+- Código: `src/validacion.py` (`pliegues_walk_forward`, `dias_en_espera`, `verificar`).
 - **No** se agrega validación dejando estaciones afuera (por ahora).
 
 ## Datos que crecen
 
-El grupo actualiza `archivos/` periódicamente (> 60 días al momento del informe).
+El grupo actualiza `archivos/` periódicamente.
 - `src/preparar_datos.py` es **incremental**: procesa solo los CSV nuevos y reescribe un día de `pares/` únicamente si cambió su observación (p. ej. el día anterior, cuando un hueco se cierra con datos del día nuevo). `--rehacer` fuerza todo de cero.
-- Controlado el 2/11: segunda corrida sin cambios (0 días reescritos) y reproceso de un día simulado como nuevo dan el mismo total (20.688.083 filas, suma de `error_c` −600.328,13).
-- Antes del informe: **congelar una fecha de corte** y repetir con ese corte las mediciones hechas con 35 días (autocorrelación, α, ablación).
+- **Los modelos también son incrementales** (17/11): cada resultado (modelo × pliegue) queda en una caché con la huella del contenido de sus datos (`src/cache.py`). Control: con el pipeline vuelto a correr completo, los dos modelos leyeron sus 3 pliegues de reporte de la caché (3 s en lugar de 2–24 min).
+- **Fecha de corte de los experimentos:** 09/11/2026 (`config.yaml` → `experimentos.fecha_corte`).
 
 ## Etapa A — Baselines (2/11/2026)
 
 - **Hora local = hora solar** (hora UTC + longitud/15, redondeada). No tiene el salto del cambio de hora civil del 1/11/2026 y sigue el ciclo del sol. El dashboard también muestra la hora solar (ver Etapa C).
-- **Baselines (la consigna dice «modelos baseline», en plural):** B0 NWS crudo (c = 0), B1 sesgo global, B2 sesgo por estación × hora solar, B3 persistencia del último error conocido. Un tramo por horizonte en B2 no mejoró (1,398 contra 1,396) y se descartó.
-- **Aprenden solo con observaciones reales del entrenamiento.** Se evalúan con filas reales y con reales + interpoladas, siempre sobre las **mismas filas** (donde B2 y B3 están definidos; 75–79 % de las filas de prueba).
-- **Causalidad de B3:** la observación de la hora H puede llegar hasta H + 59 min y el pronóstico se genera entre 60 min antes y 20 min después de «objetivo − horizonte». Por eso el último error usable es el de la hora objetivo − horizonte − 2. Una primera versión usaba objetivo − horizonte y daba 0,703 °C a 1 h: era leakage (el valor correcto es 1,24). `prueba_causalidad` lo controla en cada corrida (14,2 M de filas, 0 violaciones).
+- **Baselines (la consigna dice «modelos baseline», en plural):** B0 NWS crudo (c = 0), B1 sesgo global, B2 sesgo por estación × hora solar, B3 persistencia del último error conocido. Un tramo por horizonte en B2 no mejoró (1,398 contra 1,396, medido con 35 días) y se descartó.
+- **Aprenden solo con observaciones reales del entrenamiento.** Se evalúan con filas reales y con reales + interpoladas, siempre sobre las **mismas filas** (donde B2 y B3 están definidos).
+- **Causalidad de B3:** la observación de la hora H puede llegar hasta H + 59 min y el pronóstico se genera entre 60 min antes y 20 min después de «objetivo − horizonte». Por eso el último error usable es el de la hora objetivo − horizonte − 2. Una primera versión usaba objetivo − horizonte y daba 0,703 °C a 1 h: era leakage (el valor correcto es 1,24). `prueba_causalidad` lo controla en cada corrida (20,9 M de filas, 0 violaciones).
 - Código: `src/baselines.py`. Resultados: `data/resultados/baselines_por_pliegue.csv` y `baselines_resumen.csv`.
 
-MAE medio de los 4 pliegues (°C, filas reales; con reales + interpoladas los valores difieren en ≤ 0,01):
+MAE medio de los 5 pliegues (°C, filas reales):
 
 | Horizonte | B0 NWS crudo | B1 global | B2 estación×hora | B3 persistencia |
 |---|---|---|---|---|
-| todos | 1,474 | 1,475 | **1,389** | 1,943 |
-| 1 h | 1,334 | 1,337 | 1,263 | **1,244** |
-| 3 h | 1,354 | 1,356 | **1,276** | 1,585 |
-| 6 h | 1,372 | 1,373 | **1,292** | 1,878 |
-| 12 h | 1,390 | 1,395 | **1,331** | 2,027 |
-| 24 h | 1,488 | 1,489 | **1,393** | 1,754 |
-| 48 h | 1,604 | 1,600 | **1,511** | 2,008 |
+| todos | 1,487 | 1,488 | **1,393** | 1,962 |
+| 1 h | 1,360 | 1,362 | **1,277** | **1,277** |
+| 3 h | 1,381 | 1,382 | **1,293** | 1,609 |
+| 6 h | 1,398 | 1,399 | **1,303** | 1,900 |
+| 12 h | 1,405 | 1,408 | **1,332** | 2,042 |
+| 24 h | 1,493 | 1,494 | **1,392** | 1,765 |
+| 48 h | 1,636 | 1,634 | **1,536** | 2,024 |
 
-RMSE (todos): 1,868 / 1,870 / 1,767 / 2,491. Sesgo residual: −0,012 / −0,132 / −0,105 / +0,042.
+RMSE (todos): 1,877 / 1,880 / 1,763 / 2,516. Sesgo residual: +0,078 / +0,005 / +0,034 / +0,034.
 
 Lecturas:
-- B2 mejora a B0 un 5,8 % en MAE: hay **sesgo condicional** por estación y hora aprendible.
-- B1 empeora levemente el sesgo (−0,132 contra −0,012): el sesgo global aprendido en el entrenamiento (≈ +0,12) no se sostiene en la semana siguiente. El nivel medio del error cambia entre semanas.
-- B3 solo supera a B0 a 1 h (1,244 contra 1,334) y pierde desde 3 h.
+- B2 mejora a B0 un 6,3 % en MAE: hay **sesgo condicional** por estación y hora aprendible.
+- B1 no mejora a B0: el sesgo global no es estable entre semanas.
+- B3 solo empata o gana a 1 h y pierde desde 3 h.
 
-## Etapa A — Feature engineering (2/11/2026)
+## Etapa A — Feature engineering
 
-Familias elegidas para la primera versión: **1 base, 2 pendiente del pronóstico, 3 rezagos de horas, 4 sesgo exponencial por estación y hora**. Quedan para una ablación posterior: 5 región/vecinas y 6 revisión del pronóstico. Quedan fuera: mes, día del año, día de la semana (con 2–3 meses no se puede aprender un ciclo anual y el mes funcionaría como identificador del período) e identificador de la estación como variable (519 estaciones con ~28 días cada una: memorizaría; su sesgo habitual lo capta la familia 4).
-
-Código: `src/features.py` (genera `data/features/<dia>.parquet` y `familias.json`) y `src/verificar_features.py`.
+Familias de variables (`src/features.py`, que genera `data/features/<dia>.parquet` y `familias.json`; control en `src/verificar_features.py`). Las 8 se calculan para todos los días; qué familias usa el Ridge lo decide la experimentación, y LightGBM usa las 8. Quedan fuera: mes, día del año, día de la semana (con 2–3 meses no se puede aprender un ciclo anual y el mes funcionaría como identificador del período) e identificador de la estación como variable (memorizaría; su sesgo habitual lo capta la familia 4).
 
 | Familia | Variables |
 |---|---|
-| base | `temp_pron`, `temp_anom` (agregada el 10/11), `elev_solar` y `noche` (agregadas el 10/11), `hum_pron`, `rocio_pron`, `dep_rocio`, `viento_vel`, `viento_sin`, `viento_cos`, `viento_calmo`, `prob_lluvia`, `condicion` (7 grupos), `horizonte`, `hora_solar_sin/cos`, `lat`, `lon` |
-| pendiente | `pendiente_pron` = (pronóstico de T+1 con h+1 − pronóstico de T−1 con h−1) / 2, del **mismo ciclo de emisión** (verificado: 100 % de las filas coinciden en la hora de generación, diferencia ≤ 5 min) |
-| rezagos | `err_ult`, `err_media3`, `err_media6` (mismo horizonte, hasta T−h−2) y `err_ayer` (mismo horario, T−24·k, con 24·k ≥ h+2) |
-| sesgo_ewma | `sesgo_ewma_05/10/20/30`: promedio exponencial (α = 0,05/0,1/0,2/0,3) de la media diaria del error de la estación a esa hora, hasta el día D−k. α se calibra en validación |
+| 1 base | `temp_pron`, `temp_anom`, `elev_solar` y `noche`, `hum_pron`, `rocio_pron`, `dep_rocio`, `viento_vel`, `viento_sin`, `viento_cos`, `viento_calmo`, `prob_lluvia`, `condicion` (grupos por palabras clave), `horizonte`, `hora_solar_sin/cos`, `lat`, `lon` |
+| 2 pendiente | `pendiente_pron` = (pronóstico de T+1 con h+1 − pronóstico de T−1 con h−1) / 2, del **mismo ciclo de emisión** (verificado: 100 % de las filas coinciden en la hora de generación, diferencia ≤ 5 min) |
+| 3 rezagos | `err_ult`, `err_media3`, `err_media6` (mismo horizonte, hasta T−h−2) y `err_ayer` (mismo horario, T−24·k, con 24·k ≥ h+2) |
+| 4 sesgo_ewma | `sesgo_ewma_05/10/20/30`: promedio exponencial (α = 0,05/0,1/0,2/0,3) de la media diaria del error de la estación a esa hora, hasta el día D−k |
+| 5 vecinos | `vec_err_ult` (último error de las vecinas, mismo horizonte) y `vec_err_1h` (error a 1 h de las vecinas). Vecinas: las 5 más cercanas dentro de 100 km (4,6 por estación en promedio; ninguna queda sin vecinas) |
+| 6 revision | `rev_3h/6h/12h/24h`: pronóstico actual − pronóstico para la misma hora emitido 3, 6, 12 y 24 h antes |
+| 7 rezagos_extra | `err_hace9h` … `err_hace21h` (mismo horizonte, 9–21 h antes de la emisión) y `err1h_ult`, `err1h_media2/4/8` (error del pronóstico a 1 h de la propia estación) |
+| 8 dinamica | `obs_tend3h`, `err1h_tend3h`, `salto_obs` (tendencia y salto), `err_rocio_ult`, `err_rocio_1h` (error del punto de rocío), `err_std6`, `err_std24` (desvío del error), `dispersion_emis`, `amplitud_pron` |
 
-- **Causalidad:** la fuente más reciente de cualquier variable es la hora objetivo − horizonte − 2. Control sobre las 20,7 M de filas: 0 violaciones.
-- **Recálculo independiente** con pandas de 1.500 filas (25 estaciones): 0 discrepancias en las 9 variables derivadas.
-- **Faltantes:** `err_ult` 31,4 %, `err_media3` 28,9 %, `err_media6` 25,7 %, `err_ayer` 32,5 %, `sesgo_ewma_*` 14,7 % (los primeros días no tienen historia); el resto, 0 %. LightGBM los tolera; el modelo lineal necesitará imputar.
-- **Viento:** dirección faltante (18,8 % de las filas) equivale a velocidad 0 km/h: se trata como calma (`viento_calmo`, sen/cos = 0).
-- **Condición:** 99,5 % en 6 grupos; 'otro' (0,5 %) son las heladas (`Frost`). Tormenta incluye `T-storms`, huracán y tormenta tropical.
-- **Asociación exploratoria (todas las filas reales, no un resultado de modelo):** correlación de `pendiente_pron` con el error = 0,35 (h = 6: 0,38; h = 24: 0,35; h = 48: 0,27); de `err_ult` = 0,04 a 6 h, 0,28 a 24 h y 0,20 a 48 h. Es coherente con el desfase de ~37 min de la observación, pero la correlación no prueba la causa.
+- **Rocío observado (familia 8):** sale de `src/rocio_observado.py`, que lee los CSV del TP1 sin modificarlos y deja `data/obs_rocio.parquet`. Mismo criterio de validez que la temperatura (`match_type == "interval"`), solo valores reales.
+- **Causalidad:** la fuente más reciente de cualquier variable es la hora objetivo − horizonte − 2; los pronósticos usados se emitieron en la emisión de la fila o antes. Control sobre las 32,6 M de filas: 0 violaciones.
+- **Recálculo independiente** con pandas de 1.500 filas (25 estaciones; vecinas con otro método, BallTree): 0 discrepancias en las 34 variables derivadas.
+- **Faltantes:** `err_ult` 35,8 %, `err_media3` 32,8 %, `err_media6` 28,5 %, `err_ayer` 37,3 %, `sesgo_ewma_*` 11,1 %, `temp_anom` 9,3 %, vecinos ~15 %, rezagos extra 26–38 %, dinámica 1–49 %. LightGBM los tolera; el Ridge imputa 0 con un indicador de faltante.
+- **Viento:** dirección faltante (18,3 % de las filas) equivale a velocidad 0 km/h: se trata como calma (`viento_calmo`, sen/cos = 0).
+- **Condición** (% de filas): despejado 50,0, lluvia 13,7, parcial 13,3, nublado 12,8, tormenta 6,1, niebla 3,0, otro 1,1, nieve 0,1. Tormenta incluye `T-storms`, huracán y tormenta tropical.
+- **Asociación con el error:** ver la exploración de `notebooks/experimentos.ipynb` (correlaciones por familia y horizonte, solo días de exploración).
 
-## Datos nuevos (16–29/10) y calidad (2/11/2026)
+## Datos faltantes y falla de observaciones del NWS
 
-- `archivos/` pasó de 35 a 47 días (10/9 → 29/10). Los 12 archivos nuevos venían como `forecast_observation_v2_DDMMYYYY.csv`; se **renombraron al formato único** `forecast_observation_YYYY_MM_DD.csv` (solo cambió el nombre). `preparar_datos.py` acepta los dos formatos.
-- **Días sin archivo:** 15/10, 27/10 y 28/10. El script los avisa y la validación usa días de calendario para el gap.
+- **Formato de los archivos:** los archivos que llegaron como `forecast_observation_v2_DDMMYYYY.csv` se **renombraron al formato único** `forecast_observation_YYYY_MM_DD.csv` (solo cambió el nombre). `preparar_datos.py` acepta los dos formatos.
+- **Días sin archivo:** 15/10, 27/10, 28/10, 30/10, 31/10 y 01/11. El script los avisa y la validación usa días de calendario para el gap.
 - **Falla de observaciones.** Fracción de filas sin observación emparejada (`unmatched`, normal 4–5 %):
   - 19/10: 18 % (2 horas con todas las estaciones sin observación); 20/10: 15 % (1 hora); 22/10: 44 % (10 horas con >90 %).
-  - **23 al 26/10: 56–57 %.** Cada día, **272 de 519 estaciones no tienen ninguna observación** (contra 9–13 habituales), y son **las mismas 272 los cuatro días**. Están repartidas en 23 estados (FL 91 %, VT 83 %, GA 78 %… NY 25 %) y sus códigos van de `012MD` a `WINM6`, así que no es un bloque geográfico ni alfabético.
+  - **23 al 26/10: 56–57 %.** Cada día, **272 de 519 estaciones no tienen ninguna observación** (contra 9–13 habituales), y son **las mismas 272 los cuatro días**. Están repartidas en 23 estados (FL 91 %, VT 83 %, GA 78 %… NY 25 %), así que no es un bloque geográfico ni alfabético.
   - **Causa confirmada (10/11):** fue una falla del NWS, no de nuestra Lambda ni de la fusión.
 - **Decisión (10/11, acordada con el docente):** esos días salen del análisis. La exclusión **no es una lista manual**: la hace una regla automática (sección siguiente), que los detecta sola.
 
@@ -104,11 +109,11 @@ Código: `src/features.py` (genera `data/features/<dia>.parquet` y `familias.jso
 **Principio:** el producto recibe datos nuevos todo el tiempo; agregar días no puede romper el pipeline ni requerir tocar código. Por eso la decisión de excluir un día sale de una regla que se aplica a cada día que llega, y queda registrada con el dato que la justifica.
 
 - **Regla (relativa):** un día se excluye si su % de filas sin observación supera en más de **10 pp** la **mediana de los 14 días válidos anteriores** (mínimo 7 días de referencia). La referencia usa solo días válidos, así una falla larga no se vuelve «normal».
-- **Por qué relativa y no un umbral fijo (X %):** el nivel normal cambia. En septiembre hay ~25 % de filas sin observación (cobertura total 72–82 %), en octubre ~7 %. Un umbral del 15 % sacaría casi todo septiembre; uno del 30 % dejaría pasar el 19 y el 20/10.
+- **Por qué relativa y no un umbral fijo (X %):** el nivel normal cambia. En septiembre hay ~25 % de filas sin observación, en octubre ~7 %. Un umbral del 15 % sacaría casi todo septiembre; uno del 30 % dejaría pasar el 19 y el 20/10.
 - **Alarmas (solo avisan, no excluyen):**
   - Por día: cobertura total (real + interpolada) < 70 % en un día incluido. Detecta degradaciones lentas que la regla relativa iría absorbiendo. Se mide sobre la total y no sobre la real porque la real de septiembre es 64–70 % y la alarma sonaría siempre.
   - Del sistema: menos del 70 % de días usables en los últimos 14 días de calendario.
-- **Resultado con los 47 días actuales:** se excluyen **19, 20 y 22–26/10** (7 días; quedan 40). El 21/10 (7,7 % sin observación) queda. Ningún día incluido dispara la alarma por día; la del sistema sí suena (5 de 14 días usables entre 16 y 29/10: faltan además los archivos de 27 y 28/10).
+- **Resultado con los 55 días:** se excluyen **19, 20 y 22–26/10** (7 días; quedan 48). El 21/10 queda. Ningún día del 02–09/11 se excluye. Ningún día incluido dispara la alarma por día; la del sistema sí suena (9 de 14 días usables entre el 27/10 y el 09/11, por los días sin archivo).
 
   | Día | Sin observación | Referencia | Estaciones sin obs. |
   |---|---|---|---|
@@ -120,220 +125,71 @@ Código: `src/features.py` (genera `data/features/<dia>.parquet` y `familias.jso
 - **Dónde queda documentado:** `data/calidad/REGISTRO_CALIDAD.md` (se regenera en cada corrida, con los avisos de cambios en la lista), `calidad_por_dia.csv` y `dias_excluidos.json`. Parámetros en `config.yaml` (`calidad:`).
 - **Cómo se aplica:** `validacion.dias_disponibles()` quita los excluidos, así que baselines y modelos no los ven sin cambiar código. Las features se calculan igual para todos los días: las observaciones reales de un día excluido pueden servir de rezago a días posteriores.
 - **Controles:** un día nuevo normal simulado queda incluido; uno con 60 % de faltantes queda excluido con aviso; un día con 65 % de cobertura que pasa la regla (contexto tipo septiembre) dispara la alarma. Una segunda corrida no reescribe nada.
-- **Un solo comando:** `src/pipeline.py` corre preparación → calidad → validación → baselines → features → verificación, y se detiene si algún control falla.
+- **Un solo comando:** `src/pipeline.py` corre preparación → calidad → validación → baselines → features → verificación, y se detiene si algún control falla. Su salida se lee como informe (`salidas/salida_pipeline.txt`).
 - **Pendiente:** entender por qué septiembre tiene ~25 % de filas sin observación contra ~7 % en octubre.
-
-## Baselines con todos los días disponibles (10/11/2026)
-
-Datos: 47 días (10/9 → 29/10), 7 excluidos por calidad → **40 días**. 4 pliegues; las pruebas cubren 30/9–4/10, 5–9/10, 10–14/10 y 16/10–29/10. El último bloque tiene 5 días con datos válidos (16, 17, 18, 21 y 29/10), repartidos en dos semanas de calendario por los días excluidos y sin archivo.
-
-MAE medio de los 4 pliegues (°C, filas reales); entre paréntesis, el valor con 35 días:
-
-| Horizonte | B0 NWS crudo | B1 global | B2 estación×hora | B3 persistencia |
-|---|---|---|---|---|
-| todos | 1,486 (1,474) | 1,490 (1,475) | **1,389** (1,389) | 1,976 (1,943) |
-| 1 h | 1,354 (1,334) | 1,358 (1,337) | **1,265** (1,263) | 1,279 (1,244) |
-| 3 h | 1,375 | 1,378 | **1,281** | 1,619 |
-| 6 h | 1,391 | 1,394 | **1,293** | 1,914 |
-| 12 h | 1,406 | 1,412 | **1,330** | 2,074 |
-| 24 h | 1,488 | 1,491 | **1,387** | 1,755 |
-| 48 h | 1,645 (1,604) | 1,644 (1,600) | **1,543** (1,511) | 2,015 (2,008) |
-
-RMSE (todos): 1,882 / 1,887 / 1,761 / 2,536. Sesgo residual: +0,007 / −0,073 / −0,041 / +0,062.
-
-Lecturas:
-- B2 sigue siendo el mejor baseline y ahora mejora a B0 un **6,5 %** en MAE (5,8 % con 35 días).
-- B3 pierde a 1 h en el promedio de los 4 pliegues (1,279 contra 1,265 de B2), pero **es por el pliegue 4**: en los días con historia completa gana por poco (1,257 contra 1,262), igual que con 35 días. Ver la sección siguiente.
-- B1 sigue sin mejorar a B0: el sesgo global no es estable entre semanas.
-- El MAE por pliegue de B0 varía de 1,39 a 1,55: la dificultad cambia entre semanas, de modo que las comparaciones entre modelos deben hacerse siempre pliegue a pliegue.
-- En el pliegue 4 solo el 50 % de las filas de prueba tiene B2 y B3 definidos (75–78 % en los demás): faltan rezagos porque sus fuentes caen en días excluidos o sin archivo.
 
 ## Días con historia incompleta y métricas por segmento (10/11/2026)
 
 - **Regla:** un día válido (no excluido) tiene **historia incompleta** si falta o se excluyó alguno de los **3 días de calendario previos**. La marca **no excluye**: el target del día es bueno; lo que falta es parte de sus features con memoria (rezagos).
 - **Por qué 3 días:** los rezagos llegan hasta 55 h atrás (h = 48, más 2 h de latencia, más la media de 6 h). Parámetro: `calidad.dias_historia`.
 - **Para qué:** separar dos preguntas que el promedio mezcla. **Historia completa:** cuánto corrige el modelo con toda su información; es la **comparación entre modelos del informe**. **Historia incompleta:** cuánto corrige cuando le falta la historia reciente; mide la robustez ante caídas de la fuente, que en producción van a repetirse.
-- **Dónde queda:** la lista de días marcados se genera en cada corrida en `data/calidad/REGISTRO_CALIDAD.md` y `historia_incompleta.json`. Los resultados de baselines (y de los modelos) llevan la columna `segmento` (todas / completa / incompleta).
+- **Dónde queda:** la lista de días marcados se genera en cada corrida en `data/calidad/REGISTRO_CALIDAD.md` y `historia_incompleta.json`. Con los 55 días: 11 días marcados (10–12/09, 16–18/10, 21/10, 29/10 y 02–04/11). Los resultados de baselines y modelos llevan la columna `segmento` (todas / completa / incompleta).
 
-MAE (°C, filas reales):
+MAE de los baselines (°C, filas reales):
 
 | Segmento | Pliegues | B0 NWS | B1 global | B2 estación×hora | B3 persistencia | B3 a 1 h | B2 a 1 h |
 |---|---|---|---|---|---|---|---|
-| completa | 1–3 | 1,476 | 1,482 | **1,393** | 1,953 | **1,257** | 1,262 |
-| incompleta | 4 | 1,516 | 1,513 | **1,377** | 2,046 | 1,345 | **1,273** |
-| todas | 1–4 | 1,486 | 1,490 | **1,389** | 1,976 | 1,279 | 1,265 |
+| completa | 1, 2, 3, 5 | 1,462 | 1,465 | **1,391** | 1,934 | **1,237** | 1,262 |
+| incompleta | 4, 5 | 1,539 | 1,535 | **1,406** | 1,990 | 1,338 | **1,323** |
+| todas | 1–5 | 1,487 | 1,488 | **1,393** | 1,962 | 1,277 | 1,277 |
 
 Lecturas:
-- B2 no usa rezagos, así que rinde igual en los dos segmentos (1,393 y 1,377). La persistencia (B3) es la que más se degrada: a 1 h pasa de 1,257 a 1,345.
-- **Límite:** B3 solo se mide donde su rezago existe (las mismas filas para todos), así que el segmento «incompleta» de los baselines subestima el problema: las filas sin rezago no entran. En los modelos sí se evaluarán todas las filas, y ahí se verá cómo manejan los faltantes (LightGBM de forma nativa; el lineal con imputación más una variable indicadora).
-- El segmento «incompleta» es un solo pliegue de 5 días: sirve para describir, no para concluir.
+- B2 no usa rezagos, así que rinde parecido en los dos segmentos (1,391 y 1,406). La persistencia (B3) es la que más se degrada: a 1 h pasa de 1,237 a 1,338.
+- **Límite:** B3 solo se mide donde su rezago existe (las mismas filas para todos), así que el segmento «incompleta» de los baselines subestima el problema: las filas sin rezago no entran. Los modelos se evalúan en todas las filas.
 
-## Etapa A — Modelos (10/11/2026)
+## Etapa A — Modelos
 
-### Modelo que prioriza la interpretabilidad
+### Modelo de caja de cristal: Ridge con curvas
 
-- **Regresión lineal (Ridge) con curvas (splines) en pocas variables.** Cada variable aporta un coeficiente o una curva legible (scikit-learn: `SplineTransformer` + `Ridge`). La penalización es chica y fija (`ridge_alpha = 1`), solo por estabilidad numérica: con ~2 M de filas casi no influye.
-- **Variables, elegidas por criterio meteorológico** (no por búsqueda en los datos):
+- **Regresión lineal regularizada (Ridge) con curvas (splines).** Cada variable aporta un coeficiente o una curva legible (scikit-learn: `SplineTransformer` + `Ridge`). Recibe todas las columnas de las familias que elige la experimentación (`config.yaml` → `modelos.interpretable.familias`).
+- **Formas:**
 
-  | Variable | Forma | Mecanismo |
+  | Término | Forma | Mecanismo |
   |---|---|---|
-  | Sesgo exponencial por estación × hora (un α) | lineal | Error propio de la estación (altura, entorno, valle, costa) |
-  | `err_ult` × horizonte, `err_media3/6`, `err_ayer` | lineal; `err_ult` con peso que depende del horizonte | Persistencia de la situación del tiempo |
   | Hora solar | curva periódica | Ciclo diario y transiciones de mañana y tarde |
   | `pendiente_pron` | curva | *Timing* de frentes y del ciclo diario; desfase de la observación |
   | `temp_anom` (pronóstico − media de los pronósticos de la estación a esa hora y horizonte en los 7 días previos) | curva | Los pronósticos suavizan los extremos; en valor absoluto la curva aprendería la estación del año |
   | `dep_rocio` (temperatura − punto de rocío) | curva | Cerca de la saturación la temperatura casi no baja del punto de rocío |
   | `viento_vel` | curva | Mezcla de la capa cercana al suelo (efecto con umbral) |
-  | Condición y `prob_lluvia` | lineal | Nubosidad y enfriamiento por evaporación |
+  | `err_ult` × horizonte (y `vec_err_1h` × horizonte, si entran los vecinos) | lineal con peso que depende del horizonte | La persistencia del error se apaga con la antelación |
   | **Enfriamiento nocturno** = noche × despejado × viento < 10 km/h | indicador | Inversión por radiación que los modelos subestiman |
+  | Sesgo exponencial × noche (los 4 α) y `err_ayer` × condición | interacciones | El sesgo de la estación y la persistencia dependen de la noche y del tiempo |
+  | Resto de las columnas de cada familia | lineal | — |
 
   - **Noche** = sol bajo el horizonte (elevación < −0,833°), calculada con fecha, hora, latitud y longitud (`elev_solar`, `noche` en `features.py`). **Calma** = viento pronosticado < 10 km/h (≈ 3 m/s, valor usual para que se forme la inversión). **Despejado** = el grupo «despejado». Los umbrales se fijaron por criterio físico y no se ajustaron con los datos.
-  - **Fuera del interpretable** (solo LightGBM): humedad relativa y punto de rocío (los representa `dep_rocio`), dirección del viento (ver «Dirección del viento») y latitud y longitud.
-- **Faltantes:** rezagos, sesgo y anomalía se imputan con 0 y llevan un indicador de faltante. El resto se imputa con la mediana del entrenamiento. Splines, medianas y escalado se ajustan solo con el entrenamiento de cada pliegue.
-- **Único hiperparámetro elegido con datos:** el α del sesgo exponencial, en los pliegues de elección. El conjunto de variables se definió una vez y se corrió una sola vez.
-- **Versión descartada: Elastic Net con todas las variables.** La proporción L1/L2 no cambiaba el error, quedaban 3 de los 4 sesgos exponenciales y humedad y rocío tenían coeficientes grandes de signo opuesto. Exploración en los pliegues de elección: Ridge con todas las variables daba el mismo error que el Elastic Net (1,290 contra 1,286), y la ganancia venía del efecto no lineal de la humedad, que una curva representa de forma directa.
+- **Faltantes:** las columnas lineales y `temp_anom` se imputan con 0 y llevan un indicador de faltante; `prob_lluvia`, el horizonte y las curvas, con la mediana del entrenamiento. Splines, medianas y escalado se ajustan solo con el entrenamiento de cada pliegue.
+- **Hiperparámetro elegido con datos:** la penalización α, en una grilla de 1 a 10⁷ (`ridge_alphas`), en los pliegues de elección. Con ~10⁶ filas estandarizadas, α chico casi no penaliza: por eso se busca en una grilla amplia.
+- **Versión descartada (en `main`): Elastic Net con todas las variables.** La proporción L1/L2 no cambiaba el error, quedaban 3 de los 4 sesgos exponenciales y humedad y rocío tenían coeficientes grandes de signo opuesto. Ridge con todas las variables daba el mismo error que el Elastic Net (1,290 contra 1,286) y es más legible.
 
-### Modelo que prioriza minimizar el error
+### Modelo que prioriza minimizar el error: LightGBM
 
-- **LightGBM** con todas las familias de features (maneja faltantes de forma nativa).
+- **LightGBM con las 8 familias** (51 variables). `condicion` va como categórica; incluye dirección del viento (sen/cos), latitud y longitud. No usa `station_id`: el sesgo de cada estación entra por los sesgos exponenciales. No se imputan faltantes.
+- **Grilla (pliegues de elección):** `num_leaves` ∈ {31, 127} × objetivo ∈ {L2, L1}, con la cantidad de árboles en cortes cada 50, de 50 a 500. Los cortes finos se definieron en `main`, después de que una grilla de 250 a 2000 árboles dejara el óptimo en el borde: con ~20 días de entrenamiento, y las filas repetidas por horizonte, el modelo se sobreajusta rápido. Quedan fijos `learning_rate` 0,05, `min_child_samples` 500, `feature_fraction` y `bagging_fraction` 0,8, y `lambda_l2` 1 (`config.yaml`).
 
 ### Elección de hiperparámetros sin optimismo (los dos modelos)
 
-- **Regla:** los hiperparámetros se eligen en la **primera mitad de los pliegues** y la métrica del informe se reporta en la **segunda mitad**, que no se usó para elegir. Con los 4 pliegues actuales: se elige en los pliegues 1–2 y se reporta en 3–4. Una vez elegidos, los hiperparámetros quedan fijos y el modelo se reentrena en cada pliegue de reporte con todo su entrenamiento.
+- **Regla:** los hiperparámetros se eligen en los **pliegues de elección (1–2)** y la métrica del informe se reporta en los **pliegues siguientes (3 en adelante)**, que no se usaron para elegir. Una vez elegidos quedan **congelados** (`*_hiperparametros.json`, con las fechas de los pliegues que los eligieron); se vuelven a elegir si cambian esas fechas o las familias, o con `--reelegir`. El modelo se reentrena en cada pliegue de reporte con todo su entrenamiento.
 - **Criterio de elección:** MAE medio en filas reales con historia completa.
-- **Entrenamiento:** filas reales e interpoladas (decisión 5 del Paso 0), con una submuestra aleatoria fija (semilla de `config.yaml`) para que entre en memoria. La evaluación usa todas las filas reales de prueba.
-- **Consecuencia a tener presente:** con los datos de hoy, el pliegue 4 tiene todos sus días con historia incompleta. La comparación limpia (historia completa) de la segunda mitad queda en un solo pliegue hasta que lleguen más días.
+- **Entrenamiento:** filas reales e interpoladas (decisión 5 del Paso 0), con una submuestra aleatoria fija (semilla de `config.yaml`): 10⁶ filas para el Ridge (matriz ancha, 8 GB de RAM) y 2·10⁶ para LightGBM. La evaluación usa todas las filas reales de prueba.
+- **Historia completa en el reporte:** los días con historia completa de los pliegues de reporte están en los pliegues 3 y 5; los de historia incompleta, en el 4 y el 5.
 
-### Resultados del modelo interpretable (10/11/2026)
-
-Código: `src/modelo_interpretable.py` (las piezas comunes a los dos modelos están en `src/modelado.py`). Salidas en `data/resultados/interpretable_*`.
-
-- **Elección (pliegues 1–2, historia completa):** α del sesgo exponencial = **0,2** (MAE 1,237). Las cuatro opciones quedan a menos de 0,003 °C.
-- **Reporte (pliegues 3–4), MAE en °C sobre filas reales, todos contra las mismas filas:**
-
-  | Segmento | Pliegues | B0 NWS | B2 estación×hora | Lineal | 1 h: B2 / lineal | 48 h: B2 / lineal |
-  |---|---|---|---|---|---|---|
-  | completa | 3 | 1,555 | 1,471 | **1,402** | 1,272 / **1,049** | 1,705 / **1,638** |
-  | incompleta | 4 | 1,532 | 1,399 | **1,301** | 1,277 / **1,064** | 1,508 / **1,429** |
-  | todas | 3–4 | 1,544 | 1,435 | **1,351** | 1,275 / **1,057** | 1,606 / **1,533** |
-
-  Con historia completa mejora al NWS crudo un 9,8 % y a B2 un 4,7 %. Con historia incompleta mejora a B2 un 7,0 %. Es mejor que el Elastic Net descartado en los dos segmentos (1,413 y 1,372).
-- **Lo más influyente** (|β| estandarizado): enfriamiento nocturno, sesgo exponencial, pendiente del pronóstico, probabilidad de lluvia, cielo despejado y hora solar.
-- **Enfriamiento nocturno:** en las noches despejadas y calmas (~15 % de las filas) el modelo resta **0,94 °C** (pliegue 3) y **1,09 °C** (pliegue 4) al pronóstico, además del resto de los términos. El signo y el tamaño son estables entre pliegues.
-- **Sesgo exponencial:** 0,22–0,27 °C de corrección por cada °C de sesgo histórico. El resto lo reparten la curva horaria y los demás términos.
-- **Pendiente para la Etapa B:** graficar las curvas (hora solar, `pendiente_pron`, `temp_anom`, `dep_rocio`, `viento_vel` y el peso de `err_ult` según el horizonte) con sus unidades.
-
-### Resultados de LightGBM (10/11/2026)
-
-Código: `src/modelo_lgbm.py`. Salidas en `data/resultados/lgbm_*`, con los modelos de los pliegues de reporte en `lgbm_pliegue_*.txt`.
-
-- **Variables:** todas las familias de `features.py`. `condicion` va como categórica. No usa `station_id`: el sesgo de cada estación entra por los sesgos exponenciales. No se imputan faltantes.
-- **Grilla (pliegues 1–2):** `num_leaves` ∈ {31, 127} × objetivo ∈ {L2, L1}, con la cantidad de árboles en cortes cada 50, de 50 a 500. Quedan fijos `learning_rate` 0,05, `min_child_samples` 500, `feature_fraction` y `bagging_fraction` 0,8, y `lambda_l2` 1 (`config.yaml`).
-- **Elegido:** 31 hojas, objetivo L1 y **300 árboles** (MAE 1,218 con historia completa, contra 1,237 del Ridge en los mismos pliegues). La curva es plana alrededor del óptimo: de 250 a 500 árboles con 31 hojas y L1 la diferencia es menor a 0,002 °C, y 127 hojas con 100 árboles empata (1,218).
-- **Grilla corregida, con el reporte ya visto.**
-  - **Primera grilla:** cortes cada 250, de 250 a 2000. El óptimo quedó en el borde (250 árboles), y el error subía con más árboles en las cuatro configuraciones, más rápido con 127 hojas. Con ~20 días de entrenamiento, y las filas repetidas por horizonte, el modelo se sobreajusta rápido.
-  - **Corrección:** se re-corrió con cortes más finos. La elección siguió usando solo los pliegues 1–2.
-  - **Ya se habían visto los pliegues de reporte** de la primera grilla (MAE todas 1,324). El cambio fue por el borde, no por ese resultado, y el reporte casi no cambió (1,325).
-- **Reporte (pliegues 3–4), MAE en °C sobre las mismas filas:**
-
-  | Segmento | Pliegues | B0 | B2 | Lineal | LightGBM | 1 h: lineal / LGBM | 48 h: lineal / LGBM |
-  |---|---|---|---|---|---|---|---|
-  | completa | 3 | 1,555 | 1,471 | 1,402 | **1,382** | **1,049** / 1,071 | **1,638** / 1,651 |
-  | incompleta | 4 | 1,532 | 1,399 | 1,301 | **1,267** | **1,064** / 1,102 | 1,429 / **1,398** |
-  | todas | 3–4 | 1,544 | 1,435 | 1,351 | **1,325** | **1,057** / 1,087 | 1,533 / **1,525** |
-
-  - **Contra el Ridge:** con historia completa mejora un 1,4 %. Contra el NWS crudo mejora un 11,1 %, y contra B2 un 6,0 %.
-  - **A 1 h gana el Ridge**, que tiene explícito el término `err_ult` × horizonte.
-  - **RMSE (todas):** 1,773 y 1,636 °C, contra 1,863 y 1,762 de B2.
-  - **Sesgo del pliegue 3:** sigue en −0,30 °C, igual que B2. Ninguno de los dos corrige el cambio de régimen de esa semana.
-- **Importancia** (fracción de la ganancia): pendiente del pronóstico 0,13, sesgos exponenciales 0,21 en conjunto, hora solar 0,10, latitud y longitud 0,10 en conjunto, `err_ult` 0,01.
-
-### ¿Las diferencias entre modelos son reales? (10/11/2026)
+### ¿Las diferencias entre modelos son reales?
 
 Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.csv`.
 
 - **Unidad de la prueba: el día de prueba,** no la fila. Dentro de un día los errores de estaciones y horizontes están muy correlacionados, así que contar filas daría p-valores falsamente chicos.
-- **Prueba:** t pareado sobre la diferencia de MAE diario (Diebold–Mariano con pérdida absoluta), un intervalo bootstrap remuestreando días y la cantidad de días que gana cada modelo. Son 10 días de los pliegues 3–4. Con tan pocos días el bootstrap es optimista: manda el t.
-- **Resultados** (diferencia de MAE en °C; negativo = A mejor):
-
-  | A contra B | Todas (10 días) | Historia completa (5 días) |
-  |---|---|---|
-  | Lineal − B2 | −0,082 · p = 0,002 · gana 10/10 | −0,068 · p = 0,02 · gana 5/5 |
-  | LightGBM − B2 | −0,110 · p = 0,002 · gana 10/10 | −0,088 · p = 0,01 · gana 5/5 |
-  | LightGBM − lineal | −0,027 · p = 0,06 · gana 7/10 | −0,020 · p = 0,29 · gana 3/5 |
-
-- **Conclusión (producto, sin vecinos; el experimento con vecinos está en su sección):**
-  - Los dos modelos mejoran a B2 de forma consistente.
-  - La ventaja de LightGBM sobre el lineal **no es significativa** con los datos actuales. Casi un tercio de esa ventaja sale de un solo día, el 21/10, que está rodeado de días excluidos (0,11 °C ese día).
-  - Se vuelve a medir cuando haya más días.
-
-### Experimento: errores de las estaciones vecinas (familia 5, 10/11/2026)
-
-- **Estado: experimento, no forma parte del producto.** Regla acordada: si una variable no mejora el modelo de forma demostrable, no entra al producto y queda registrada como experimento. `features.py` calcula y verifica la familia, pero los modelos solo la usan con `--vecinos`. Esa corrida guarda sus salidas con el sufijo `_exp_vecinos`.
-
-- **Motivo:** el error del pronóstico tiene correlación espacial: la misma situación del tiempo afecta a toda la zona. Se buscó información nueva porque la grilla plana de LightGBM indicaba que el límite no está en el algoritmo.
-- **Variables** (`features.py`, configuradas en `config.yaml` → `features.vecinos`):
-  - **Vecinas:** las 5 estaciones más cercanas dentro de 100 km. En promedio cada estación tiene 4,6, y ninguna queda sin vecinas.
-  - `vec_err_ult`: media del último error de las vecinas con el mismo horizonte.
-  - `vec_err_1h`: media del error del pronóstico a 1 h de las vecinas en la misma hora fuente.
-  - **Causalidad:** las dos usan la misma fuente que los rezagos (objetivo − h − 2 h). `verificar_features.py` las recalcula con otro método (BallTree) y da 0 discrepancias.
-- **En los modelos:**
-  - **Ridge:** las dos van como lineales, con 0 más un indicador cuando faltan. `vec_err_1h` lleva además un peso que depende del horizonte, igual que `err_ult`.
-  - **LightGBM:** las recibe con el resto de las familias.
-  - Los dos volvieron a elegir sus hiperparámetros en los pliegues 1–2. El Ridge mantuvo α = 0,2. LightGBM pasó a 127 hojas, L2 y 100 árboles, aunque la curva sigue plana: hay 9 configuraciones a menos de 0,004 °C.
-- **Resultado (pliegues 3–4, MAE en °C):**
-
-  | Segmento | Lineal sin → con vecinos | LightGBM sin → con vecinos |
-  |---|---|---|
-  | completa | 1,402 → 1,401 | 1,382 → 1,381 |
-  | incompleta | 1,301 → 1,301 | 1,267 → **1,253** |
-  | todas | 1,351 → 1,351 | 1,325 → 1,317 |
-
-  - Con historia completa no aportan nada; LightGBM les da 0,1 % de la ganancia.
-  - Ayudan cuando falta la historia propia: faltan en el 14 % de las filas, contra el 35 % de `err_ult`.
-  - **Significancia (día como unidad):** LightGBM contra el lineal ahora gana 9 de 10 días (p = 0,01). Pero con historia completa sigue sin ser significativa (p = 0,24, 4 de 5 días). La ventaja está en los días con historia incompleta (p = 0,03, 5 de 5).
-- **Por qué aportan tan poco.** El último error conocido, solo, deja de servir a las pocas horas, y el de las vecinas repite esa misma información:
-  - La correlación entre el error y `err_ult` es de 0,50 a 1 h, pero de solo 0,08 a 6 h. A 24 h y a 48 h vuelve a subir (0,19 y 0,13), porque la fuente queda cerca de la misma hora del día anterior.
-  - El error de las vecinas está muy correlacionado con el de la propia estación (0,67–0,78), así que repite información que ya teníamos.
-  - **Conclusión:** las vecinas no suman información nueva sobre la persistencia del error. Lo que sí anticipan los modelos sale de combinar el sesgo de cada estación con la situación del tiempo (ver Etapa B).
-- **Decisión:** no entra al producto. Con historia completa no mejora, y la mejora con historia incompleta (−1,1 % en LightGBM) sale de un solo pliegue. Se vuelve a evaluar con más días (`--vecinos`).
-
-### Experimento: dinámica reciente (familia 8) y Ridge con todas las columnas (16/11/2026)
-
-- **Estado: experimento, no forma parte del producto.** Rige la misma regla que para los vecinos: `features.py` calcula y verifica la familia, pero los modelos solo la usan con `--dinamica` (sufijo `_exp_dinamica`) o con `--todas` (sufijo `_exp_todas`).
-- **Motivo:** los rezagos solo miran el error de temperatura del mismo horizonte. Esta familia suma lo que viene cambiando en las últimas horas, el error de otra variable y cuánto dudó el NWS.
-- **Variables** (`features.py`, familia 8; parámetros arriba del archivo):
-
-  | Grupo | Columnas | Qué mide |
-  |---|---|---|
-  | Tendencia | `obs_tend3h`, `err1h_tend3h`, `salto_obs` | cambio observado en 3 h; tendencia observada − pronosticada (con el pronóstico a 1 h); pronóstico actual − última temperatura observada |
-  | Rocío | `err_rocio_ult`, `err_rocio_1h` | rocío observado − pronosticado (mismo horizonte / a 1 h): masa de aire más húmeda o más seca de lo previsto |
-  | Desvío del error | `err_std6`, `err_std24` | qué tan errático viene el pronóstico de la estación (últimas 6 / 24 h) |
-  | Dispersión | `dispersion_emis` | desvío del pronóstico para la misma hora entre la emisión actual y las de hasta 24 h antes |
-  | Amplitud | `amplitud_pron` | máximo − mínimo pronosticado en ±12 h, misma emisión (días despejados con mucha amplitud térmica) |
-
-  - **Rocío observado:** sale de `src/rocio_observado.py`, que lee los CSV del TP1 sin modificarlos y deja `data/obs_rocio.parquet`. Usa el mismo criterio de validez que la temperatura (`match_type == "interval"`) y solo valores reales, sin interpolar.
-  - **Causalidad:** las observaciones usan la misma fuente que los rezagos (objetivo − h − 2 h). Los pronósticos usados se emitieron en la emisión de la fila o antes. `verificar_features.py` recalcula las 9 columnas con pandas y da 0 discrepancias. 0 filas de 27,8 M usan una fuente posterior a la emisión.
-- **`--todas`:** activa a la vez las familias 5 (vecinos), 6 (revisión), 7 (rezagos extra) y 8.
-  - **LightGBM:** recibe las 51 columnas.
-  - **Ridge:**
-    - **Columnas:** recibe todas como lineales, con 0 más un indicador de faltante, los 4 sesgos exponenciales y dos interacciones: sesgo × noche (los 4 α) y `err_ayer` × condición (8 grupos).
-    - **Penalización:** con α = 1 y unos 10⁶ filas estandarizadas, el Ridge prácticamente no penaliza, porque cada columna aporta del orden de n a `X'X`. Por eso en este modo se elige α de la grilla `ridge_alphas_todas` (1 a 10⁷) en los pliegues 1–2. Así achica los coeficientes de lo que no aporta.
-    - **Filas:** entrena con 10⁶ filas (`max_filas_todas`) por memoria: la matriz tiene unas 156 columnas.
-- **Corrección:** antes de este cambio, `--rezagos` no le sumaba ninguna columna al Ridge. Ahora le suma la familia 7.
-- **Resultado (pliegues 3–4, MAE en °C):**
-
-  | Segmento | Ridge producto → todas | LightGBM producto → todas |
-  |---|---|---|
-  | completa | 1,402 → 1,425 | 1,382 → 1,375 |
-  | incompleta | 1,301 → 1,308 | 1,267 → 1,250 |
-  | todas | 1,352 → **1,367** | 1,325 → **1,313** |
-
-  - **LightGBM:** −0,9 %, concentrado en horizontes cortos (−5,4 % a 1 h, −2,4 % a 6 h; nada a 24–48 h). Día como unidad: −0,012 °C, mejora 6 de 10 días, p = 0,12 (IC95 −0,026 a 0,000). Las familias nuevas se llevan ~13 % de la ganancia.
-  - **Ridge:** +1,1 %, mejora 2 de 10 días (p = 0,08). α elegido = 10⁵, en el interior de la grilla (con α = 1 la elección daba 1,273 contra 1,246). Mejora a 1 h y empeora a 24–48 h: los términos lineales sobre columnas crudas no generalizan entre ventanas.
-  - Dentro de `--todas`, LightGBM le gana al Ridge 10 de 10 días (p = 0,002), pero porque el Ridge empeoró.
-- **Decisión:** no entra al producto. LightGBM no mejora de forma significativa y el Ridge empeora. Pendiente: correr cada familia por separado para ver cuál explica la mejora de LightGBM a 1 h.
-- **Comparación:** sección 14 de `notebooks/comparacion_modelos.ipynb`. `comparar_modelos.py --todas` entrena cada modelo con su propia submuestra (Ridge 10⁶, LightGBM 2·10⁶ filas).
+- **Prueba:** t pareado sobre la diferencia de MAE diario (Diebold–Mariano con pérdida absoluta), un intervalo bootstrap remuestreando días y la cantidad de días que gana cada modelo. Con pocos días el bootstrap es optimista: manda el t.
+- Resultados: en «Resultado de la experimentación y modelos finales».
 
 ### Experimentación por familias y regla de recorte del Ridge (17/11/2026)
 
@@ -343,7 +199,7 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
 - **Recorrido por familia (1 a 8):** hipótesis experta → exploración (correlaciones, boxplots, redundancia) → Ridge con todas las familias → Ridge sin cada familia. Después se decide si conviene el formato acumulativo.
 - **Regla de recorte (fijada antes de ver resultados):** una familia se saca del Ridge si, sin ella, el MAE promedio de los pliegues de elección no empeora en más de **0,005 °C** y en ningún pliegue de elección empeora en más de **0,010 °C**.
   - **Por qué antes:** si el umbral se elige mirando las tablas, se termina eligiendo el que favorece el resultado esperado. Escrita antes, la regla se puede defender, repetir y aplicar sola con datos nuevos.
-  - **Por qué 0,005 °C:** es menos del 0,5 % del MAE (≈ 1,3 °C) y está por debajo del ruido entre días ya medido (con `--todas`, LightGBM mejoró 0,012 °C por día con p = 0,12). Lo que cambia menos que eso no se puede distinguir con estos datos y solo resta legibilidad.
+  - **Por qué 0,005 °C:** es menos del 0,5 % del MAE (≈ 1,3 °C) y está por debajo del ruido entre días ya medido (en la rama `main`, sumar las familias 5 a 8 mejoró LightGBM 0,012 °C por día con p = 0,12). Lo que cambia menos que eso no se puede distinguir con estos datos y solo resta legibilidad.
   - **Por qué 0,010 °C por pliegue:** no sacar una familia que en promedio no importa, pero en un período concreto sí ayuda. Duplica el umbral promedio para tolerar el ruido de un solo pliegue.
   - **Confirmación conjunta:** las familias que la regla saca una por una se sacan juntas. Si juntas empeoran más de 0,005 °C (se reemplazan entre sí), se devuelve al modelo la de **mayor** costo de sacarla (la que más ayuda) y se vuelve a probar.
   - El grupo puede apartarse de la regla solo dejando escrita la razón.
@@ -424,46 +280,34 @@ Decisiones tomadas al implementar la experimentación y los pliegues anclados (r
 | Pico de memoria de ~3–4 GB al transformar 1 M de filas de entrenamiento | Es el paso con más riesgo en 8 GB de RAM |
 | `comparar_modelos.py` no verifica que el LightGBM guardado corresponda a los datos actuales | Si solo se reentrena el Ridge, compara un Ridge nuevo con un LightGBM viejo; el orden del pipeline lo evita |
 
-### Dirección del viento (10/11/2026)
+## Etapa B — Interpretación
 
-- **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.
-- **Diagnóstico:** `src/diagnostico_viento.py`, solo en los pliegues de elección. Aprende sobre el entrenamiento un efecto por estación × sector, contraído hacia 0, sobre el residuo de B2, y lo mide en la semana de prueba. Resultados en `data/resultados/diagnostico_viento*.csv`.
-- **Resultado:** fuera de muestra la mejora sobre B2 es como mucho 0,3 % (MAE 1,366 → 1,361). Sin contracción empeora 2,1 %. El efecto global por sector tampoco aporta (+0,1 %). Dentro del entrenamiento las diferencias entre sectores son grandes (mediana 0,54 °C por estación) y se concentran en estaciones de montaña y de costa, pero no se sostienen en la semana siguiente. Con ~23 días, cada estación vio pocos episodios de cada régimen de viento.
-- **Decisión:**
-  - **Modelo interpretable:** sin dirección del viento.
-  - **LightGBM:** recibe dirección (sen/cos), latitud y longitud.
-  - **Volver a evaluar** con más de 60–90 días de datos (mismo script).
-  - **Trabajo futuro:** variables geográficas explícitas (orientación de la costa y relieve de cada estación).
-
-## Etapa B — Interpretación (10/11/2026)
-
-Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `data/resultados/interp_*.csv`. Modelos del producto (sin vecinos), pliegues de reporte 3–4. Las curvas y el SHAP salen del último pliegue, que tiene el entrenamiento más largo. SHAP: contribuciones exactas de LightGBM (TreeSHAP) en 100 000 filas de prueba.
+Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `data/resultados/interp_*.csv`. Modelos finales (Ridge con 5 familias, LightGBM con 8), pliegues de reporte 3–5. Las curvas y el SHAP salen del último pliegue, que tiene el entrenamiento más largo. SHAP: contribuciones exactas de LightGBM (TreeSHAP) en 100 000 filas de prueba.
 
 - **Curvas del Ridge** (`interp_curvas_ridge.png`): aporte de cada variable a la corrección, en °C.
-  - **Enfriamiento nocturno:** −1,09 °C en noches despejadas y calmas.
-  - **Pendiente del pronóstico:** casi lineal, de −0,8 a +1,0 °C. Si el pronóstico sube rápido, la observación queda por encima.
-  - **Hora solar:** −0,5 °C a las 15 h y +0,3 °C de noche, además del sesgo exponencial.
-  - **Depresión del rocío:** +0,5 °C cerca de la saturación.
-  - **Viento:** de −0,3 °C en calma a +0,3 °C con viento fuerte.
-  - **Anomalía:** casi plana (±0,1 °C).
-  - **Peso de `err_ult`:** 0,35 °C por °C a 1 h, 0,09 a 6 h y menos de 0,1 después.
-- **SHAP de LightGBM** (`interp_shap_lgbm.png`), |contribución| media en °C: pendiente del pronóstico 0,26, viento 0,21, anomalía 0,15, sesgo exponencial (α 0,3) 0,15 y elevación solar 0,11.
-- **Latitud y longitud** (`interp_latlon.png`): su aporte medio por estación casi no se relaciona con el sesgo histórico de la estación (r = 0,27, 509 estaciones). Los sesgos exponenciales, en cambio, sí (r = 0,80). Lat y lon no funcionan como identificador de la estación: aportan un efecto regional de unos ±0,2 °C.
+  - **Enfriamiento nocturno:** −0,81 °C en noches despejadas y calmas.
+  - **Pendiente del pronóstico:** casi lineal, de −0,8 a +0,9 °C. Si el pronóstico sube rápido, la observación queda por encima.
+  - **Hora solar:** −0,4 °C a las 15 h y +0,2 °C de madrugada, además del sesgo exponencial.
+  - **Depresión del rocío:** +0,3 °C cerca de la saturación.
+  - **Viento:** de −0,3 °C en calma a +0,2 °C con viento fuerte.
+  - **Anomalía:** chica (−0,1 a +0,3 °C); sube cuando el pronóstico es mucho más frío que el de la semana previa.
+  - **Peso de `err_ult`:** 0,31 °C por °C a 1 h, 0,10 a 6 h, 0,06 a 24 h y 0,03 a 48 h.
+- **SHAP de LightGBM** (`interp_shap_lgbm.png`), |contribución| media en °C: pendiente del pronóstico 0,23, viento 0,15, sesgo exponencial (α 0,3) 0,15, condición 0,12 y probabilidad de lluvia 0,12.
+- **Latitud y longitud** (`interp_latlon.png`): su aporte medio por estación casi no se relaciona con el sesgo histórico de la estación (r = 0,23). Los sesgos exponenciales, en cambio, sí (r = 0,78). Lat y lon no funcionan como identificador de la estación: aportan un efecto regional.
 - **¿Se captó el sesgo sistemático?** (`interp_sesgo_hora.png`):
 
   | Corrección | Amplitud del ciclo por hora (°C) | Desvío entre estaciones (°C) | Error medio (°C) |
   |---|---|---|---|
-  | NWS crudo (B0) | 2,89 | 0,51 | −0,09 |
-  | B2 | 0,70 | 0,38 | −0,05 |
-  | Ridge | 0,53 | 0,36 | −0,07 |
-  | LightGBM | 0,48 | 0,37 | −0,16 |
+  | NWS crudo (B0) | 2,62 | 0,49 | +0,05 |
+  | B2 | 0,49 | 0,35 | +0,09 |
+  | Ridge | 0,41 | 0,32 | +0,03 |
+  | LightGBM | 0,33 | 0,33 | +0,05 |
 
-  - El NWS subestima a las 8 h (+1,3 °C) y sobrestima a las 18 h (−1,6 °C). Los modelos casi eliminan ese ciclo.
-  - El desvío restante entre estaciones incluye el ruido de promediar solo 10 días de prueba, así que no todo es sesgo sin corregir.
-  - **LightGBM** queda algo corrido hacia abajo (−0,16 °C), porque el objetivo L1 apunta a la mediana y no a la media. También deja un pico de −0,5 °C a las 18 h.
+  - Los modelos casi eliminan el ciclo diario del error del NWS.
+  - El desvío restante entre estaciones incluye el ruido de promediar solo 15 días de prueba, así que no todo es sesgo sin corregir.
 - **Cuánto del error se anticipa** (`interp_techo.png`), como correlación entre la corrección y el error del NWS:
-  - **Modelos:** 0,60–0,63 a 1 h, ~0,50–0,54 a 6–12 h y 0,39–0,41 a 48 h. Explican entre el 15 % y el 40 % de la varianza del error.
-  - **`err_ult` solo:** cae a ~0 en 6 h y oscila con el ciclo diario. Es positivo cuando la fuente cae cerca de la misma hora del día anterior (h ≈ 22) y negativo cuando cae en la fase opuesta.
+  - **Modelos:** 0,63–0,65 a 1 h, 0,50–0,56 a 6 h y 0,37–0,40 a 48 h. Explican entre el 14 % y el 42 % de la varianza del error.
+  - **`err_ult` solo:** 0,52 a 1 h, cae a ~0 en 6–12 h y oscila con el ciclo diario (0,25 a 24 h, 0,17 a 48 h).
 - **Pendiente para el informe:** elegir qué figuras van y redactarlas.
 
 ## Etapa C — Dashboard (10/11/2026)
@@ -471,9 +315,8 @@ Código: `src/interpretar.py`. Figuras en `figuras/interp_*.png` y tablas en `da
 Código: `app/dashboard.py`, con los datos de `src/preparar_dashboard.py`. Se corre desde `TP3/` con `.venv/bin/streamlit run app/dashboard.py`.
 
 - **Herramienta:** Streamlit con Plotly, en Python como el resto del pipeline. Se entrega como código ejecutable.
-- **Que cualquiera pueda correrlo** (pedido del 10/11/2026): los datos del dashboard se versionan en `app/datos/` (~17 MB, comprimidos con zstd). Así el dashboard corre sin los datos crudos (17 GB) y sin el pipeline. La app solo necesita `app/requirements.txt` (5 paquetes con versión fija, Python ≥ 3.11), y los pasos están en el README.
-  - **Prueba:** se copió lo que va al repo a una carpeta aparte, se creó un entorno nuevo con esos requisitos y se corrió la app con `streamlit.testing`. Funcionó sin errores, y con filtros dio los mismos números que la versión de trabajo.
-  - **Para actualizarlo con datos nuevos:** correr el pipeline completo y después `src/preparar_dashboard.py`.
+- **Que cualquiera pueda correrlo** (pedido del 10/11/2026): los datos del dashboard se versionan en `app/datos/` (~26 MB, comprimidos con zstd). Así el dashboard corre sin los datos crudos y sin el pipeline. La app solo necesita `app/requirements.txt` (5 paquetes con versión fija, Python ≥ 3.11), y los pasos están en el README.
+  - **Para actualizarlo con datos nuevos:** correr el pipeline completo, los modelos y después `src/preparar_dashboard.py`.
 - **Identidad visual: propuesta A, de taste-skill**, estilo «libro contable acromático». Se eligió frente a la B (Carbon de IBM, del catálogo awesome-design-md).
   - **Paleta:** fondo gris azulado #f2f4f7, tarjetas blancas, tinta #0a0a0a y gris #6b6b6b.
   - **Color:** el único color es el azul #1d5fbf del pronóstico corregido y su banda. Verde y rojo marcan solo la mejora o el empeoramiento.
@@ -488,13 +331,10 @@ Código: `app/dashboard.py`, con los datos de `src/preparar_dashboard.py`. Se co
   - **Lista:** las estaciones donde la corrección menos ayuda.
   - **Descarga:** las filas filtradas, hasta 50 000.
 - **Filtros:** corrección (Ridge o LightGBM), horizonte, hora solar local, condición del tiempo y estados.
-- **Datos:** solo los días de prueba de los pliegues de reporte (3–4), que los modelos no vieron al entrenar. Son 4,6 millones de filas con observación real.
+- **Datos:** solo los días de prueba de los pliegues de reporte (3–5), que los modelos no vieron al entrenar. Son 6,8 millones de filas con observación real de 516 estaciones.
 - **Confianza del pronóstico** (banda empírica):
   - **Calibración:** percentiles 10 y 90 del error que queda después de corregir, medidos en las pruebas de los pliegues de elección (1–2), por tramo de horizonte × condición del tiempo. Si un grupo tiene menos de 2000 filas, se usa solo el tramo.
-  - **Cobertura real en los pliegues de reporte:** 75 % (Ridge 0,751, LightGBM 0,756), contra el 80 % esperado. Baja a ~72 % a 37–48 h y a 68 % con lluvia. El dashboard muestra la cobertura real junto a la esperada.
-  - **Sin niveles de confianza:** se descartó la etiqueta «alta / media / baja». El ancho de la banda varía poco (3,1–4,7 °C según horizonte y condición), así que la etiqueta no informaría nada.
+  - **Cobertura real en los pliegues de reporte:** 74–75 % (Ridge 0,737, LightGBM 0,750), contra el 80 % esperado. El dashboard muestra la cobertura real junto a la esperada.
+  - **Sin niveles de confianza:** se descartó la etiqueta «alta / media / baja» (en `main`, el ancho de la banda variaba poco: 3,1–4,7 °C según horizonte y condición).
 - **Hora solar en lugar de hora civil:** no tenemos la zona horaria de cada estación, y AL, MS y parte de TN, KY y FL están en la hora Central. El filtro y los gráficos usan la hora solar local, la misma que usan los modelos, y se rotula así.
-- **Lo que muestra con los filtros** (para el informe):
-  - **Con lluvia:** el Ridge mejora un 3,9 % y LightGBM un 1,5 %, contra 12,4 % y 14,2 % sin filtro.
-  - **Límite conocido:** al cambiar los filtros, la estación elegida puede volver a la primera de la lista.
-
+- **Límite conocido:** al cambiar los filtros, la estación elegida puede volver a la primera de la lista.

@@ -11,7 +11,7 @@ Pendiente: informe y presentación.
 
 ## Ver el dashboard (Etapa C)
 
-No hacen falta los datos crudos ni correr el pipeline: los datos del dashboard están en `app/datos/` (~17 MB).
+No hacen falta los datos crudos ni correr el pipeline: los datos del dashboard están en `app/datos/` (~26 MB).
 Requiere Python 3.11 o más nuevo y git.
 
 macOS o Linux:
@@ -30,7 +30,7 @@ py -3 -m venv .venv-app; .venv-app\Scripts\pip install -r app/requirements.txt
 .venv-app\Scripts\streamlit run app/dashboard.py
 ```
 
-Se abre en el navegador en http://localhost:8501. La primera carga tarda unos segundos (4,6 millones de filas).
+Se abre en el navegador en http://localhost:8501. La primera carga tarda unos segundos (6,8 millones de filas).
 Para regenerar `app/datos/` con datos nuevos: correr el pipeline completo y después `src/preparar_dashboard.py`.
 
 ## Cómo reproducir
