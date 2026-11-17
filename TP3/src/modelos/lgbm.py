@@ -16,13 +16,16 @@ es sustancialmente mejor que el Ridge regularizado de caja de cristal. Los hiper
 (quedan congelados en lgbm_hiperparametros.json; --reelegir los vuelve a elegir) y cada pliegue de reporte queda
 en la caché (data/cache/lgbm/): si sus datos no cambiaron, no se vuelve a entrenar.
 
-Uso:  .venv/bin/python src/modelo_lgbm.py [--reelegir]
+Uso:  .venv/bin/python src/modelos/lgbm.py [--reelegir]
 """
 import itertools
 import json
 import sys
 import time
 from pathlib import Path
+
+if __package__ in (None, ""):                    # corrido como script: src/ tiene que estar en el path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import lightgbm as lgb
 import numpy as np
@@ -31,13 +34,13 @@ import pandas as pd
 import cache
 from formato import dec, n as n_
 from modelado import CFG, RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
-from modelo_interpretable import CONDICIONES, FAMILIAS, TODAS, fechas_eleccion
+from modelos.ridge import CONDICIONES, FAMILIAS, TODAS, fechas_eleccion
 
 P = CFG["modelos"]["lgbm"]
 VERSION = 2
 X_COLS = [c for cols in FAMILIAS.values() for c in cols]
 COLUMNAS = ["station_id", "target_time_utc", "error_c", "obs_interpolada"] + X_COLS
-CODIGO = cache.huella_archivos([Path(__file__), Path(__file__).with_name("modelado.py")])   # editar invalida la caché
+CODIGO = cache.huella_archivos([Path(__file__), Path(__file__).resolve().parents[1] / "modelado.py"])   # editar invalida la caché
 GRILLA = [dict(num_leaves=h, objective=o) for h, o in itertools.product(P["num_leaves"], P["objetivos"])]
 CORTES = list(range(P["paso_arboles"], P["max_arboles"] + 1, P["paso_arboles"]))
 
@@ -102,6 +105,32 @@ def pliegue_reporte(k, tr, te, params, n_arb):
            "filas_entrenamiento": len(A)}
     cache.guardar("lgbm", clave, res)
     return res, False
+
+
+# --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------
+COLUMNA = "lgbm"
+REPORTE = RAIZ / "data" / "resultados" / "lgbm_por_pliegue.csv"
+
+
+def hiperparametros_producto():
+    """Los hiperparámetros congelados, si se eligieron con los pliegues de elección actuales."""
+    eleccion, _ = pliegues_eleccion_reporte()
+    ruta = RAIZ / "data" / "resultados" / "lgbm_hiperparametros.json"
+    hp = json.loads(ruta.read_text()) if ruta.exists() else {}
+    if hp.get("familias") != TODAS or hp.get("pliegues_eleccion_fechas") != fechas_eleccion(eleccion):
+        raise RuntimeError("faltan los hiperparámetros de LightGBM o son viejos: correr src/modelos/lgbm.py")
+    return {"num_leaves": hp["num_leaves"], "objective": hp["objective"], "arboles": hp["arboles"],
+            "max_filas": CFG["modelos"]["max_filas_entrenamiento"]}
+
+
+def entrenar_producto(dias, hp):
+    A = cargar_entrenamiento(dias, COLUMNAS, hp["max_filas"])
+    m = entrenar(A, {"num_leaves": hp["num_leaves"], "objective": hp["objective"]}, hp["arboles"])
+    return m.model_to_string(), len(A)                 # texto: se guarda y se carga sin depender de la versión de pickle
+
+
+def predecir_producto(modelo, df):
+    return lgb.Booster(model_str=modelo).predict(matriz(df))
 
 
 def main():

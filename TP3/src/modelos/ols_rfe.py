@@ -1,7 +1,7 @@
 """Modelo explicativo alternativo: regresión lineal SIN penalización (OLS) con selección por RFE.
 
 Es un experimento independiente del Ridge del producto (DECISIONES.md, «Experimento: OLS con RFE»). Mismo dataset y
-misma matriz de diseño (Disenio de modelo_interpretable.py con las 8 familias: curvas spline, interacciones e
+misma matriz de diseño (Disenio de modelos/ridge.py con las 8 familias: curvas spline, interacciones e
 indicadores de faltante), pero la selección la hace Recursive Feature Elimination y no el encogimiento del Ridge.
 No usa nada que haya decidido el Ridge: ni su α, ni la ablación por familias, ni sus 5 familias.
 
@@ -21,19 +21,25 @@ OLS sale de la misma matriz XᵀX que usa ridge_gram.Gram (con α = 0). La matri
 (solución de norma mínima): la predicción y el aporte de cada variable no dependen de cuál solución se tome, porque
 la colinealidad es interna a cada variable.
 
-Uso:  .venv/bin/python src/modelo_rfe.py                 (RFE, curva y reporte)
-      .venv/bin/python src/modelo_rfe.py --pesos-ridge   (peso por variable del Ridge, para la comparación)
+Uso:  .venv/bin/python src/modelos/ols_rfe.py                 (RFE, curva y reporte)
+      .venv/bin/python src/modelos/ols_rfe.py --pesos-ridge   (peso por variable del Ridge, para la comparación)
 """
 import json
 import re
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):                    # corrido como script: src/ tiene que estar en el path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
 
 import cache
 import experimentos as E
-import modelo_interpretable as MI
-from modelado import RAIZ, evaluar, pliegues_eleccion_reporte
+import modelos.ridge as MI
+from modelado import RAIZ, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte
+from ridge_gram import Gram
 
 SALIDA = RAIZ / "salidas" / "rfe"
 TOL_AUTOVALOR = 1e-10                      # autovalores < TOL · máximo se tratan como 0 (colinealidad exacta)
@@ -173,6 +179,33 @@ def pesos_ridge():
     pd.DataFrame(filas).to_csv(SALIDA / "pesos_ridge.csv", index=False)
 
 
+# --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------
+COLUMNA = "ols_rfe"
+REPORTE = SALIDA / "por_pliegue.csv"
+
+
+def hiperparametros_producto():
+    """El conjunto de variables congelado, si se eligió con los pliegues de elección actuales."""
+    ruta = SALIDA / "conjunto_elegido.json"
+    hp = json.loads(ruta.read_text()) if ruta.exists() else {}
+    if hp.get("pliegues_eleccion_fechas") != MI.fechas_eleccion(E.pliegues()[0]):
+        raise RuntimeError("falta el conjunto de variables de OLS + RFE o es viejo: correr src/modelos/ols_rfe.py")
+    return {"variables": hp["variables"], "max_filas": MI.P["max_filas"]}
+
+
+def entrenar_producto(dias, hp):
+    A = cargar_entrenamiento(dias, MI.columnas_de(MI.TODAS), hp["max_filas"])
+    dis = MI.Disenio(MI.TODAS).fit(A)
+    g = Gram.desde(dis.transform(A), A["error_c"].to_numpy())
+    coef, b0 = ols(g, np.isin(variable_de(dis), hp["variables"]))
+    return (dis, coef, b0), len(A)
+
+
+def predecir_producto(modelo, df):
+    dis, coef, b0 = modelo
+    return MI.predecir(dis, coef, b0, df)
+
+
 # --- main --------------------------------------------------------------------------------------------------------
 def main():
     SALIDA.mkdir(parents=True, exist_ok=True)
@@ -248,5 +281,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     pesos_ridge() if "--pesos-ridge" in sys.argv else main()

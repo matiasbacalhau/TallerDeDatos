@@ -24,8 +24,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-import modelo_interpretable as MI
-import modelo_lgbm as ML
+import modelos.ridge as MI
+import modelos.lgbm as ML
 import cache
 from modelado import RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, pliegues_eleccion_reporte, preparar_prueba
 

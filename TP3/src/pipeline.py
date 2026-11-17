@@ -10,6 +10,9 @@ primer paso que falle (por ejemplo, si un control de causalidad no pasa).
   4. baselines           B0-B3 en los pliegues -> data/resultados/
   5. features            variables por día -> data/features/
   6. verificar_features  causalidad y recálculo independiente
+  7. producto            entrena el modelo elegido en config.yaml (producto.modelo) -> data/producto/
+
+La parte experimental (elegir hiperparámetros y comparar modelos) no corre acá: son los scripts de src/modelos/.
 
 Uso:  .venv/bin/python src/pipeline.py              # incremental
       .venv/bin/python src/pipeline.py --rehacer    # rehace data/pares/ de cero
@@ -22,7 +25,8 @@ import time
 SRC = Path(__file__).resolve().parent
 PASOS = {"preparar_datos": "Preparar los datos", "calidad_dias": "Control de calidad por día",
          "validacion": "Esquema de validación", "baselines": "Baselines (correcciones simples a superar)",
-         "features": "Variables para los modelos", "verificar_features": "Control independiente de las variables"}
+         "features": "Variables para los modelos", "verificar_features": "Control independiente de las variables",
+         "producto": "Modelo producto (el elegido en config.yaml)"}
 
 
 def main():

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 import cache
-import modelo_interpretable as MI
+import modelos.ridge as MI
 from modelado import CFG, RAIZ, SEMILLA, _archivo, cargar_entrenamiento, dias_historia_incompleta, evaluar, preparar_prueba
 from ridge_gram import Gram
 from validacion import CFG as CFG_VAL, dias_disponibles, pliegues_walk_forward, verificar

@@ -8,7 +8,7 @@ Figuras en figuras/ (PNG para el informe) y tablas en data/resultados/interp_*.c
   4. interp_techo.png          correlación entre el error y lo que se sabe al emitir, por horizonte
 
 SHAP: contribuciones exactas de LightGBM (TreeSHAP, predict(pred_contrib=True)).
-Uso:  .venv/bin/python src/interpretar.py   (requiere haber corrido modelo_interpretable.py y modelo_lgbm.py)
+Uso:  .venv/bin/python src/interpretar.py   (requiere haber corrido modelos/ridge.py y modelos/lgbm.py)
 """
 import json
 
@@ -19,8 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import modelo_interpretable as MI
-import modelo_lgbm as ML
+import modelos.ridge as MI
+import modelos.lgbm as ML
 from modelado import RAIZ, SEMILLA, cargar_entrenamiento, pliegues_eleccion_reporte, preparar_prueba
 
 RES = RAIZ / "data" / "resultados"

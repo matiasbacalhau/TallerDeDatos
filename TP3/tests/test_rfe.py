@@ -5,8 +5,8 @@ from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
-import modelo_interpretable as MI
-import modelo_rfe as R
+import modelos.ridge as MI
+import modelos.ols_rfe as R
 from ridge_gram import Gram
 
 

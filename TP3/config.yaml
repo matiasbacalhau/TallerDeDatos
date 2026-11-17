@@ -28,6 +28,8 @@ calidad:                             # exclusión automática de días (acordado
   alarma_dias_utiles_min: 0.70       # alarma si en los últimos 14 días de calendario hay < 70 % de días usables
   dias_historia: 3                   # un día válido tiene «historia incompleta» si falta o se excluyó alguno de
                                      # los 3 días previos: los rezagos llegan hasta 55 h atrás (h=48, +2 h, media de 6)
+producto:                            # el modelo que entrena src/producto.py (lo decide el grupo con comparacion_modelos.ipynb)
+  modelo: lgbm                       # ridge | lgbm | ols_rfe
 modelos:                             # decisiones del 10/11/2026 (ver DECISIONES.md, Etapa A — Modelos)
   max_filas_entrenamiento: 2000000   # submuestra aleatoria (semilla) del entrenamiento de cada pliegue
   interpretable:                     # Ridge con curvas; familias según la experimentación (17/11/2026)

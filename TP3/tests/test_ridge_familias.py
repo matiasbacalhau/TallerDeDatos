@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
 
-import modelo_interpretable as MI
+import modelos.ridge as MI
 
 
 def sintetico(n=2000, semilla=1):

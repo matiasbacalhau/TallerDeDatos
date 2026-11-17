@@ -15,15 +15,15 @@ Salidas en app/datos/ (versionadas en git, ~17 MB, para que el dashboard corra s
     los une a las filas al cargar);
   - cobertura.csv y estaciones.parquet.
 
-Uso:  .venv/bin/python src/preparar_dashboard.py   (después de modelo_interpretable.py y modelo_lgbm.py)
+Uso:  .venv/bin/python src/preparar_dashboard.py   (después de modelos/ridge.py y modelos/lgbm.py)
 """
 import json
 
 import numpy as np
 import pandas as pd
 
-import modelo_interpretable as MI
-import modelo_lgbm as ML
+import modelos.ridge as MI
+import modelos.lgbm as ML
 from modelado import RAIZ, cargar_entrenamiento, dias_historia_incompleta, hora_solar, pliegues_eleccion_reporte, cargar_prueba
 
 RES = RAIZ / "data" / "resultados"

@@ -29,12 +29,15 @@ Pasos (main):
   2. Con ese α se entrena y se evalúa cada pliegue de reporte, contra B0 y B2, por segmento. Cada pliegue queda
      en la caché (data/cache/ridge/): si sus datos no cambiaron, no se vuelve a entrenar.
 
-Uso:  .venv/bin/python src/modelo_interpretable.py [--reelegir]
+Uso:  .venv/bin/python src/modelos/ridge.py [--reelegir]
 """
 import json
 import sys
 import time
 from pathlib import Path
+
+if __package__ in (None, ""):                    # corrido como script: src/ tiene que estar en el path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
@@ -59,8 +62,8 @@ SIEMPRE = ["station_id", "target_time_utc", "error_c", "obs_interpolada", "horiz
            "hora_solar_cos", "noche", "condicion"]               # evaluación, B2, interacciones y spline del horizonte
 POR_HORIZONTE = {"err_ult": "rezagos", "vec_err_1h": "vecinos"}  # su peso depende de la antelación
 BLOQUE = 200_000                                                 # filas por bloque al predecir (memoria)
-CODIGO = cache.huella_archivos([Path(__file__), Path(__file__).with_name("modelado.py"),
-                                 Path(__file__).with_name("ridge_gram.py")])   # editar el modelo invalida la caché
+SRC = Path(__file__).resolve().parents[1]
+CODIGO = cache.huella_archivos([Path(__file__), SRC / "modelado.py", SRC / "ridge_gram.py"])   # editar el modelo invalida la caché
 SESGO = "los 4 (lineales)"      # antes se elegía UN sesgo exponencial; ahora entran los 4 como columnas
 
 
@@ -267,6 +270,32 @@ def pliegue_reporte(k, tr, te, familias, alpha, max_filas):
            "familia_de": dict(zip(dis.nombres, dis.familia_de)), "filas_entrenamiento": len(A)}
     cache.guardar("ridge", clave, res)
     return res, False
+
+
+# --- interfaz de producto (la usa src/producto.py) ------------------------------------------------------------
+COLUMNA = "lineal"                                  # nombre del modelo en evaluar() y en los CSV de resultados
+REPORTE = RAIZ / "data" / "resultados" / "interpretable_por_pliegue.csv"
+
+
+def hiperparametros_producto():
+    """Los hiperparámetros congelados, si se eligieron con los pliegues de elección actuales."""
+    eleccion, _ = pliegues_eleccion_reporte()
+    hp = hiperparametros_vigentes(RAIZ / "data" / "resultados" / "interpretable_hiperparametros.json",
+                                  list(P["familias"]), fechas_eleccion(eleccion))
+    if hp is None:
+        raise RuntimeError("faltan los hiperparámetros del Ridge o son viejos: correr src/modelos/ridge.py")
+    return {"familias": hp["familias"], "ridge_alpha": hp["ridge_alpha"], "max_filas": P["max_filas"]}
+
+
+def entrenar_producto(dias, hp):
+    """(modelo, filas de entrenamiento) con todos los días dados."""
+    A = cargar_entrenamiento(dias, columnas_de(hp["familias"]), hp["max_filas"])
+    return ajustar(A, hp["familias"], hp["ridge_alpha"]), len(A)
+
+
+def predecir_producto(modelo, df):
+    dis, m = modelo
+    return predecir(dis, m.coef_, m.intercept_, df)
 
 
 def main():
