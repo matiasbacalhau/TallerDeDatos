@@ -298,6 +298,31 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
   - **Conclusión:** las vecinas no suman información nueva sobre la persistencia del error. Lo que sí anticipan los modelos sale de combinar el sesgo de cada estación con la situación del tiempo (ver Etapa B).
 - **Decisión:** no entra al producto. Con historia completa no mejora, y la mejora con historia incompleta (−1,1 % en LightGBM) sale de un solo pliegue. Se vuelve a evaluar con más días (`--vecinos`).
 
+### Experimento: dinámica reciente (familia 8) y Ridge con todas las columnas (16/11/2026)
+
+- **Estado: experimento, no forma parte del producto.** Rige la misma regla que para los vecinos: `features.py` calcula y verifica la familia, pero los modelos solo la usan con `--dinamica` (sufijo `_exp_dinamica`) o con `--todas` (sufijo `_exp_todas`).
+- **Motivo:** los rezagos solo miran el error de temperatura del mismo horizonte. Esta familia suma lo que viene cambiando en las últimas horas, el error de otra variable y cuánto dudó el NWS.
+- **Variables** (`features.py`, familia 8; parámetros arriba del archivo):
+
+  | Grupo | Columnas | Qué mide |
+  |---|---|---|
+  | Tendencia | `obs_tend3h`, `err1h_tend3h`, `salto_obs` | cambio observado en 3 h; tendencia observada − pronosticada (con el pronóstico a 1 h); pronóstico actual − última temperatura observada |
+  | Rocío | `err_rocio_ult`, `err_rocio_1h` | rocío observado − pronosticado (mismo horizonte / a 1 h): masa de aire más húmeda o más seca de lo previsto |
+  | Desvío del error | `err_std6`, `err_std24` | qué tan errático viene el pronóstico de la estación (últimas 6 / 24 h) |
+  | Dispersión | `dispersion_emis` | desvío del pronóstico para la misma hora entre la emisión actual y las de hasta 24 h antes |
+  | Amplitud | `amplitud_pron` | máximo − mínimo pronosticado en ±12 h, misma emisión (días despejados con mucha amplitud térmica) |
+
+  - **Rocío observado:** sale de `src/rocio_observado.py`, que lee los CSV del TP1 sin modificarlos y deja `data/obs_rocio.parquet`. Usa el mismo criterio de validez que la temperatura (`match_type == "interval"`) y solo valores reales, sin interpolar.
+  - **Causalidad:** las observaciones usan la misma fuente que los rezagos (objetivo − h − 2 h). Los pronósticos usados se emitieron en la emisión de la fila o antes. `verificar_features.py` recalcula las 9 columnas con pandas y da 0 discrepancias. 0 filas de 27,8 M usan una fuente posterior a la emisión.
+- **`--todas`:** activa a la vez las familias 5 (vecinos), 6 (revisión), 7 (rezagos extra) y 8.
+  - **LightGBM:** recibe las 51 columnas.
+  - **Ridge:**
+    - **Columnas:** recibe todas como lineales, con 0 más un indicador de faltante, los 4 sesgos exponenciales y dos interacciones: sesgo × noche (los 4 α) y `err_ayer` × condición (8 grupos).
+    - **Penalización:** con α = 1 y unos 10⁶ filas estandarizadas, el Ridge prácticamente no penaliza, porque cada columna aporta del orden de n a `X'X`. Por eso en este modo se elige α de la grilla `ridge_alphas_todas` (1 a 10⁷) en los pliegues 1–2. Así achica los coeficientes de lo que no aporta.
+    - **Filas:** entrena con 10⁶ filas (`max_filas_todas`) por memoria: la matriz tiene unas 156 columnas.
+- **Corrección:** antes de este cambio, `--rezagos` no le sumaba ninguna columna al Ridge. Ahora le suma la familia 7.
+- **Resultado (pliegues 3–4):** pendiente.
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.

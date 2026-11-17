@@ -11,7 +11,7 @@ independiente daría p-valores falsamente chicos. Con D_d = MAE_A(d) − MAE_B(d
   - intervalo bootstrap del 95 % remuestreando días;
   - cuántos días gana cada modelo.
 
-Uso:  .venv/bin/python src/comparar_modelos.py [--vecinos]
+Uso:  .venv/bin/python src/comparar_modelos.py [--vecinos] [--revision] [--rezagos] [--dinamica] | [--todas]
 """
 import json
 
@@ -34,10 +34,10 @@ def predicciones_por_dia(reporte):
     columnas = list(dict.fromkeys(MI.COLUMNAS + ML.COLUMNAS))
     filas = []
     for k, (tr, te) in reporte:
-        A = cargar_entrenamiento(tr, columnas)
+        A = cargar_entrenamiento(tr, columnas, MI.P["max_filas_todas"] if MI.EXP_TODAS else None)
         T = preparar_prueba(te, tr, columnas)
         T = T[T["B2"].notna()].reset_index(drop=True)           # mismas filas que evaluar()
-        dis, m = MI.ajustar(A, hp_lin["sesgo"])
+        dis, m = MI.ajustar(A, hp_lin["sesgo"], hp_lin["ridge_alpha"])
         pred = {"B0": np.zeros(len(T)), "B2": T["B2"].to_numpy(), "lineal": m.predict(dis.transform(T)),
                 "lgbm": ML.entrenar(A, params, hp_gbm["arboles"]).predict(ML.matriz(T))}
         e = T["error_c"].to_numpy()

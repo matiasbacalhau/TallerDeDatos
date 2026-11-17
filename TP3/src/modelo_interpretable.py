@@ -30,7 +30,12 @@ Pasos:
   2. Con ese α fijo se reentrena y se evalúa en la segunda mitad, contra B0 y B2, por segmento.
   3. Se guardan los coeficientes por pliegue.
 
-Uso:  .venv/bin/python src/modelo_interpretable.py [--vecinos]
+EXPERIMENTO --todas: además de las variables de arriba entran como lineales TODAS las columnas de todas las
+familias (faltante -> 0 + indicador) y los cuatro sesgos exponenciales. En vez del α del sesgo se elige la
+penalización del Ridge (ridge_alphas_todas) en los pliegues de elección, para que achique lo que no aporta.
+Suma dos interacciones: sesgo exponencial × noche (los 4 α) y err_ayer × condición (8 grupos).
+
+Uso:  .venv/bin/python src/modelo_interpretable.py [--vecinos] [--revision] [--rezagos] [--dinamica] | [--todas]
 """
 import json
 import time
@@ -40,17 +45,23 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import SplineTransformer, StandardScaler
 
-from modelado import CFG, EXP_VECINOS, RAIZ, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, EXP_DINAMICA, EXP_REVISION, EXP_REZAGOS, EXP_TODAS, EXP_VECINOS, RAIZ, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
 
 P = CFG["modelos"]["interpretable"]
 LINEALES = ["prob_lluvia", "horizonte"]
 CURVAS = ["pendiente_pron", "temp_anom", "dep_rocio", "viento_vel"]
-REZAGOS = ["err_ult", "err_media3", "err_media6", "err_ayer"] + (["vec_err_ult", "vec_err_1h"] if EXP_VECINOS else [])
+REZAGOS = (["err_ult", "err_media3", "err_media6", "err_ayer"] + (["vec_err_ult", "vec_err_1h"] if EXP_VECINOS else [])
+           + (["rev_3h", "rev_6h", "rev_12h", "rev_24h"] if EXP_REVISION else []))   # faltante -> 0 + indicador
+FAMILIAS = json.loads((RAIZ / "data" / "features" / "familias.json").read_text())
+REZAGOS += ((FAMILIAS["rezagos_extra"] if EXP_REZAGOS else []) + (FAMILIAS["dinamica"] if EXP_DINAMICA else []))
 POR_HORIZONTE = ["err_ult"] + (["vec_err_1h"] if EXP_VECINOS else [])   # su peso depende de la antelación
 CONDICIONES = ["despejado", "parcial", "nublado", "lluvia", "tormenta", "niebla", "nieve", "otro"]
 SESGOS = [f"sesgo_ewma_{int(round(a * 100)):02d}" for a in CFG["features"]["alfas_ewma"]]
+if EXP_TODAS:                                   # todas las columnas restantes, como lineales con indicador de faltante
+    _usadas = set(LINEALES + CURVAS + REZAGOS + ["hora_solar_sin", "hora_solar_cos", "noche", "condicion"])
+    REZAGOS += [c for cols in FAMILIAS.values() for c in cols if c not in _usadas]       # incluye los 4 sesgos
 COLUMNAS = (["station_id", "target_time_utc", "error_c", "obs_interpolada", "hora_solar_sin", "hora_solar_cos",
-             "noche", "condicion"] + LINEALES + CURVAS + REZAGOS + SESGOS)
+             "noche", "condicion"] + LINEALES + CURVAS + list(dict.fromkeys(REZAGOS + SESGOS)))
 
 
 class Disenio:
@@ -97,7 +108,7 @@ class Disenio:
         agregar(np.column_stack([cond == c for c in CONDICIONES]), [f"cond_{c}" for c in CONDICIONES])
         enfr = df["noche"].to_numpy(bool) & (cond == "despejado") & (df["viento_vel"].to_numpy() < P["umbral_calma_kmh"])
         agregar(enfr, ["enfriamiento_nocturno"])
-        for c in REZAGOS + [self.sesgo]:                # faltante -> 0 + indicador
+        for c in REZAGOS + ([self.sesgo] if self.sesgo else []):   # faltante -> 0 + indicador
             v = df[c].to_numpy(dtype=np.float64)
             falta = np.isnan(v)
             agregar(np.where(falta, 0.0, v), [c])
@@ -116,13 +127,27 @@ class Disenio:
         for c in POR_HORIZONTE:
             e = np.nan_to_num(df[c].to_numpy(dtype=np.float64))
             agregar(G * e[:, None], [f"{c}_x_h_s{i}" for i in range(G.shape[1])])
+        if EXP_TODAS:                                   # interacciones que un modelo lineal no descubre solo
+            noche = df["noche"].to_numpy(np.float64)
+            for c in SESGOS:                            # el sesgo de la estación pesa distinto de noche
+                agregar(np.nan_to_num(df[c].to_numpy(np.float64)) * noche, [f"{c}_x_noche"])
+            ayer = np.nan_to_num(df["err_ayer"].to_numpy(np.float64))
+            agregar(np.column_stack([ayer * (cond == c) for c in CONDICIONES]),   # persistencia según el tiempo
+                    [f"err_ayer_x_{c}" for c in CONDICIONES])
         return np.hstack(bloques), nombres
 
 
-def ajustar(A, sesgo):
+def ajustar(A, sesgo, alpha=P["ridge_alpha"]):
     dis = Disenio(sesgo).fit(A)
-    m = Ridge(alpha=P["ridge_alpha"]).fit(dis.transform(A), A["error_c"].to_numpy())
+    m = Ridge(alpha=alpha).fit(dis.transform(A), A["error_c"].to_numpy())
     return dis, m
+
+
+def candidatos():
+    """Lo que se elige en los pliegues de elección: el α del sesgo (producto) o la penalización (--todas)."""
+    if EXP_TODAS:
+        return [{"sesgo": None, "alpha": float(a)} for a in P["ridge_alphas_todas"]]   # YAML lee 1.0e4 como texto
+    return [{"sesgo": s, "alpha": P["ridge_alpha"]} for s in SESGOS]
 
 
 def main():
@@ -133,37 +158,39 @@ def main():
 
     # --- 1. elección del α del sesgo exponencial -------------------------------------------
     grilla = []
+    max_filas = P["max_filas_todas"] if EXP_TODAS else None
     for k, (tr, te) in eleccion:
         t0 = time.time()
-        A = cargar_entrenamiento(tr, COLUMNAS)
+        A = cargar_entrenamiento(tr, COLUMNAS, max_filas)
         T = preparar_prueba(te, tr, COLUMNAS)
-        for sesgo in SESGOS:
-            dis, m = ajustar(A, sesgo)
+        for c in candidatos():
+            dis, m = ajustar(A, c["sesgo"], c["alpha"])
             for f in evaluar(T, {"lineal": m.predict(dis.transform(T))}, k):
                 if f["modelo"] == "lineal" and f["horizonte"] == "todos":
-                    grilla.append({**f, "sesgo": sesgo})
+                    grilla.append({**f, **c, "clave": f"{c['sesgo']}|{c['alpha']:g}"})
         print(f"pliegue {k}: {len(A):,} filas de entrenamiento | {len(T):,} de prueba | {time.time() - t0:.0f} s")
     G = pd.DataFrame(grilla)
     G.to_csv(salida / f"interpretable_eleccion{SUFIJO}.csv", index=False)
-    crit = G[G.segmento == "completa"].groupby("sesgo")["MAE"].mean().sort_values()
-    print("\nMAE medio (historia completa) en los pliegues de elección:")
+    crit = G[G.segmento == "completa"].groupby("clave")["MAE"].mean().sort_values()
+    print("\nMAE medio (historia completa) en los pliegues de elección (sesgo|α):")
     print(crit.round(4).to_string())
-    sesgo = crit.index[0]
-    print("elegido:", sesgo)
+    sesgo, alpha = crit.index[0].split("|")
+    sesgo, alpha = (None if sesgo == "None" else sesgo), float(alpha)
+    print("elegido:", sesgo, "α =", alpha)
 
     # --- 2. reporte en la segunda mitad ------------------------------------------------------
     filas, coefs = [], []
     for k, (tr, te) in reporte:
-        A = cargar_entrenamiento(tr, COLUMNAS)
+        A = cargar_entrenamiento(tr, COLUMNAS, max_filas)
         T = preparar_prueba(te, tr, COLUMNAS)
-        dis, m = ajustar(A, sesgo)
+        dis, m = ajustar(A, sesgo, alpha)
         filas += evaluar(T, {"lineal": m.predict(dis.transform(T))}, k)
         coefs.append(pd.Series(m.coef_, index=dis.nombres, name=f"pliegue_{k}"))
     R = pd.DataFrame(filas)
     R.to_csv(salida / f"interpretable_por_pliegue{SUFIJO}.csv", index=False)
     C = pd.concat(coefs, axis=1)
     C.to_csv(salida / f"interpretable_coeficientes{SUFIJO}.csv")
-    (salida / f"interpretable_hiperparametros{SUFIJO}.json").write_text(json.dumps({"sesgo": sesgo, **P}))
+    (salida / f"interpretable_hiperparametros{SUFIJO}.json").write_text(json.dumps({**P, "sesgo": sesgo, "ridge_alpha": alpha}))
 
     pd.set_option("display.width", 200)
     for seg in ("completa", "incompleta", "todas"):

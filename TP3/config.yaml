@@ -27,6 +27,8 @@ modelos:                             # decisiones del 10/11/2026 (ver DECISIONES
   max_filas_entrenamiento: 2000000   # submuestra aleatoria (semilla) del entrenamiento de cada pliegue
   interpretable:                     # Ridge con curvas (spline); variables por criterio meteorológico
     ridge_alpha: 1.0                 # penalización chica y fija, solo por estabilidad numérica
+    ridge_alphas_todas: [1.0, 1.0e4, 1.0e5, 1.0e6, 1.0e7]   # solo con --todas: grilla de α (pliegues de elección)
+    max_filas_todas: 1000000          # solo con --todas: submuestra más chica (la matriz es ~3 veces más ancha)
     umbral_calma_kmh: 10             # enfriamiento nocturno: viento pronosticado < 10 km/h (~3 m/s)
   lgbm:                              # minimizar el error; grilla chica elegida en los pliegues de elección
     num_leaves: [31, 127]            # grilla: complejidad de cada árbol

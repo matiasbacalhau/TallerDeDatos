@@ -11,6 +11,21 @@ que "aprender" del entrenamiento, así que se generan una sola vez para todas la
   4. Sesgo EWMA   promedio exponencial de días del error por estación y hora (tipo NBM)
   5. Vecinos      últimos errores conocidos de las K estaciones más cercanas (dentro de max_km). EXPERIMENTO:
                   se calcula y se verifica, pero los modelos del producto no la usan (solo con --vecinos)
+  6. Revisión     cuánto cambió el pronóstico para la MISMA hora objetivo respecto del emitido k horas antes
+                  (rev_kh = pronóstico actual − pronóstico con horizonte h+k). EXPERIMENTO: solo con --revision
+  7. Rezagos extra (EXPERIMENTO, solo con --rezagos)
+                  a) err_hace{k}h: error del mismo horizonte de la hora  objetivo − h − k  (k = 9..21 h antes de la emisión)
+                  b) err1h_*: error del pronóstico A 1 h de la propia estación (lo más fresco: «cuánto venimos
+                     errando hoy»), último conocido y medias de las últimas 2, 4 y 8 horas, misma fuente que err_ult
+  8. Dinámica     (EXPERIMENTO, solo con --dinamica; misma fuente que err_ult salvo donde se indica)
+                  a) tendencia: obs_tend3h (cambio OBSERVADO en las últimas 3 h), err1h_tend3h (cambio del error a 1 h
+                     = tendencia observada − pronosticada) y salto_obs (pronóstico actual − última temperatura observada)
+                  b) rocío: err_rocio_ult / err_rocio_1h = rocío observado − pronosticado (mismo horizonte / a 1 h).
+                     El rocío observado sale de src/rocio_observado.py (data/obs_rocio.parquet)
+                  c) err_std6 / err_std24: desvío del error (mismo horizonte) en las últimas 6 / 24 h
+                  d) dispersion_emis: desvío del pronóstico para la MISMA hora T entre la emisión actual y las de
+                     hasta 24 h antes (horizontes h..h+24): «dispersión de ensamble» de pobre
+                  e) amplitud_pron: máximo − mínimo pronosticado en ±12 h alrededor de T, misma emisión
 
 DÍAS EXCLUIDOS POR CALIDAD (src/calidad_dias.py): las features se calculan para todos los días. Las
 observaciones REALES de un día excluido pueden servir de rezago a días posteriores (son correctas,
@@ -26,6 +41,7 @@ Uso:  .venv/bin/python src/features.py
 from pathlib import Path
 import glob
 import json
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -39,6 +55,12 @@ NH = 48                                      # horizontes 1..48
 DIAS_ANOM, MIN_DIAS_ANOM = 7, 3              # anomalía de temperatura: media de los pronósticos de 7 días previos
 SOL_HORIZONTE = -0.833                       # elevación del sol al salir/ponerse (refracción + radio del disco)
 VEC = CFG["features"]["vecinos"]
+REVISION_H = (3, 6, 12, 24)                  # familia 6: horas entre la emisión actual y la anterior comparada
+REZAGOS_LARGOS_H = (9, 12, 15, 18, 21)       # familia 7a: horas antes de la emisión
+VENTANAS_1H = ((2, 1), (4, 2), (8, 4))       # familia 7b: (ventana en horas, mínimo de datos)
+VENTANAS_STD = ((6, 3), (24, 8))             # familia 8c: (ventana en horas, mínimo de datos)
+DISP_H, MIN_DISP = 24, 3                     # familia 8d: emisiones de hasta 24 h antes, al menos 3 valores
+AMP_H, MIN_AMP = 12, 12                      # familia 8e: ±12 h alrededor de T, al menos 12 valores
 
 COLS_LECTURA = ["station_id", "state", "latitude", "longitude", "forecast_generated_at_utc", "target_time_utc",
                 "horizon_target_hours", "temperature_forecast_c", "relative_humidity_forecast_pct",
@@ -76,16 +98,38 @@ def construir_tensores():
     nT = (int((dias.max() - t0) / pd.Timedelta(days=1)) + 1) * 24      # días completos
     ERR = np.full((NH, len(estaciones), nT), np.nan, dtype=np.float32)   # error REAL (obs - pron)
     TEMP = np.full((NH, len(estaciones), nT), np.nan, dtype=np.float32)  # temperatura pronosticada
+    ROCP = np.full((NH, len(estaciones), nT), np.nan, dtype=np.float32)  # rocío pronosticado
     for f in archivos:
         d = pd.read_parquet(f, columns=["station_id", "target_time_utc", "horizon_target_hours",
-                                        "temperature_forecast_c", "error_c", "obs_interpolada"])
+                                        "temperature_forecast_c", "dewpoint_forecast_c", "error_c", "obs_interpolada"])
         s = estaciones.get_indexer(d["station_id"].astype(str))
         t = ((d["target_time_utc"] - t0) / pd.Timedelta(hours=1)).astype(int).to_numpy()
         h = d["horizon_target_hours"].to_numpy().astype(int) - 1
         TEMP[h, s, t] = d["temperature_forecast_c"].to_numpy()
+        ROCP[h, s, t] = d["dewpoint_forecast_c"].to_numpy()
         real = d["error_c"].notna().to_numpy() & ~d["obs_interpolada"].to_numpy()
         ERR[h[real], s[real], t[real]] = d["error_c"].to_numpy()[real]
-    return estaciones, t0, ERR, TEMP
+    return estaciones, t0, ERR, TEMP, ROCP
+
+
+def serie_obs(estaciones, t0, nT, archivo, col, filtro=None):
+    """O[s, t]: valor observado REAL por estación y hora (NaN si no hay)."""
+    o = pd.read_parquet(RAIZ / "data" / archivo)
+    if filtro is not None:
+        o = o[filtro(o)]
+    s = estaciones.get_indexer(o["station_id"].astype(str))
+    t = ((o["target_time_utc"] - t0) / pd.Timedelta(hours=1)).astype(int).to_numpy()
+    ok = (s >= 0) & (t >= 0) & (t < nT)
+    O = np.full((len(estaciones), nT), np.nan, dtype=np.float32)
+    O[s[ok], t[ok]] = o[col].to_numpy()[ok]
+    return O
+
+
+def desvios_moviles(ERR, ventana, min_periodos):
+    """Desvío (ddof=0) de ERR[h, s, t-ventana+1 .. t] con al menos min_periodos datos."""
+    m1 = medias_moviles(ERR, ventana, min_periodos).astype(np.float64)
+    m2 = medias_moviles(ERR.astype(np.float64) ** 2, ventana, min_periodos).astype(np.float64)
+    return np.sqrt(np.clip(m2 - m1 ** 2, 0, None)).astype(np.float32)
 
 
 def medias_moviles(ERR, ventana, min_periodos):
@@ -193,7 +237,7 @@ def tensor_vecinos(ERR, V):
         return np.where(n > 0, suma / n, np.nan).astype(np.float32)
 
 
-def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV):
+def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV, E1, OBS, ROC, ROCP, SD):
     s = estaciones.get_indexer(d["station_id"].astype(str))
     t = ((d["target_time_utc"] - t0) / pd.Timedelta(hours=1)).astype(int).to_numpy()
     h = d["horizon_target_hours"].to_numpy().astype(int)
@@ -256,6 +300,39 @@ def features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV):
     # ---- 5. vecinos (misma fuente que los rezagos: T - h - RETRASO)
     X["vec_err_ult"] = tomar(NV, h, src)                       # mismo horizonte que la fila
     X["vec_err_1h"] = tomar(NV, np.ones_like(h), src)          # pronóstico a 1 h: lo más reciente de la zona
+    # ---- 6. revisión: el pronóstico para la misma hora T emitido k horas antes tiene horizonte h+k
+    #      (se emitió antes que el de la fila, así que se conocía). NaN si h+k > 48.
+    for k in REVISION_H:
+        X[f"rev_{k}h"] = f - tomar(TEMP, h + k, t)
+    # ---- 7a. rezagos largos: mismo horizonte, k horas antes de la emisión (k > RETRASO, así que ya se conocían)
+    for k in REZAGOS_LARGOS_H:
+        X[f"err_hace{k}h"] = tomar(ERR, h, t - h - k)
+    # ---- 7b. error del pronóstico a 1 h de la propia estación (E1[0] = último; E1[j] = media de VENTANAS_1H[j-1])
+    uno = np.ones_like(h)
+    X["err1h_ult"] = tomar(ERR, uno, src)
+    for (v, _), M in zip(VENTANAS_1H, E1):
+        X[f"err1h_media{v}"] = tomar(M, uno, src)
+    # ---- 8. dinámica
+    def tomar_obs(O, tt):
+        ok = (tt >= 0) & (tt < nT)
+        v = np.full(len(tt), np.nan, dtype=np.float32)
+        v[ok] = O[s[ok], tt[ok]]
+        return v
+    o_src = tomar_obs(OBS, src)
+    X["obs_tend3h"] = o_src - tomar_obs(OBS, src - 3)                        # a) tendencia
+    X["err1h_tend3h"] = X["err1h_ult"].to_numpy() - tomar(ERR, uno, src - 3)
+    X["salto_obs"] = f - o_src
+    r_src = tomar_obs(ROC, src)                                              # b) rocío
+    X["err_rocio_ult"] = r_src - tomar(ROCP, h, src)
+    X["err_rocio_1h"] = r_src - tomar(ROCP, uno, src)
+    for (v, _), M in zip(VENTANAS_STD, SD):                                  # c) desvío del error
+        X[f"err_std{v}"] = tomar(M, h, src)
+    with warnings.catch_warnings():                                          # nanstd/nanmax de filas vacías
+        warnings.simplefilter("ignore", RuntimeWarning)
+        D = np.column_stack([tomar(TEMP, h + j, t) for j in range(DISP_H + 1)])          # d) misma hora T
+        X["dispersion_emis"] = np.where((~np.isnan(D)).sum(1) >= MIN_DISP, np.nanstd(D, axis=1), np.nan)
+        A = np.column_stack([tomar(TEMP, h + j, t + j) for j in range(-AMP_H, AMP_H + 1)])  # e) misma emisión
+        X["amplitud_pron"] = np.where((~np.isnan(A)).sum(1) >= MIN_AMP, np.nanmax(A, 1) - np.nanmin(A, 1), np.nan)
     return X
 
 
@@ -267,6 +344,10 @@ FAMILIAS = {
     "rezagos": ["err_ult", "err_media3", "err_media6", "err_ayer"],
     "sesgo_ewma": [f"sesgo_ewma_{int(round(a * 100)):02d}" for a in ALFAS],
     "vecinos": ["vec_err_ult", "vec_err_1h"],
+    "revision": [f"rev_{k}h" for k in REVISION_H],
+    "rezagos_extra": [f"err_hace{k}h" for k in REZAGOS_LARGOS_H] + ["err1h_ult"] + [f"err1h_media{v}" for v, _ in VENTANAS_1H],
+    "dinamica": ["obs_tend3h", "err1h_tend3h", "salto_obs", "err_rocio_ult", "err_rocio_1h"]
+                + [f"err_std{v}" for v, _ in VENTANAS_STD] + ["dispersion_emis", "amplitud_pron"],
 }
 
 
@@ -274,16 +355,21 @@ def main():
     salida = RAIZ / "data" / "features"
     salida.mkdir(exist_ok=True)
     print("construyendo tensores...")
-    estaciones, t0, ERR, TEMP = construir_tensores()
+    estaciones, t0, ERR, TEMP, ROCP = construir_tensores()
+    nT = ERR.shape[2]
+    OBS = serie_obs(estaciones, t0, nT, "obs_horaria.parquet", "temp_obs_c", lambda o: ~o["obs_interpolada"])
+    ROC = serie_obs(estaciones, t0, nT, "obs_rocio.parquet", "dewpoint_observed_c")
+    SD = [desvios_moviles(ERR, v, m) for v, m in VENTANAS_STD]
     R3, R6 = medias_moviles(ERR, 3, 2), medias_moviles(ERR, 6, 3)
     EW = tensor_ewma(ERR, t0, ALFAS)
     MP = tensor_media_pron(TEMP)
     V = vecinos(estaciones)
     print(f"vecinos: {(V >= 0).sum(1).mean():.1f} por estación en promedio, {int((V[:, 0] < 0).sum())} estaciones sin ninguna")
     NV = tensor_vecinos(ERR, V)
+    E1 = [medias_moviles(ERR[:1], v, m) for v, m in VENTANAS_1H]      # solo el horizonte 1 h
     for p in sorted((RAIZ / "data" / "pares").glob("*.parquet")):
         d = pd.read_parquet(p, columns=COLS_LECTURA)
-        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV).to_parquet(salida / p.name, index=False)
+        features_dia(d, estaciones, t0, ERR, TEMP, R3, R6, EW, MP, NV, E1, OBS, ROC, ROCP, SD).to_parquet(salida / p.name, index=False)
     (salida / "familias.json").write_text(json.dumps(FAMILIAS, indent=1))
     print("listo:", len(list(salida.glob('*.parquet'))), "días")
 

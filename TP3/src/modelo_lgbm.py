@@ -11,7 +11,7 @@ Regla (DECISIONES.md, Etapa A — Modelos):
   2. Con eso fijo se reentrena en cada pliegue de la segunda mitad y se reporta contra B0, B2 y el
      modelo interpretable (si ya se corrió: se lee de data/resultados/interpretable_por_pliegue.csv).
 
-Uso:  .venv/bin/python src/modelo_lgbm.py [--vecinos]   (--vecinos: experimento con la familia 5, no es el producto)
+Uso:  .venv/bin/python src/modelo_lgbm.py [--vecinos] [--revision] [--rezagos] [--dinamica] | [--todas]   (experimentos con las familias 5 a 8, no son el producto)
 """
 import itertools
 import json
@@ -21,12 +21,13 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from modelado import CFG, EXP_VECINOS, RAIZ, SEMILLA, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
+from modelado import CFG, EXP_DINAMICA, EXP_REVISION, EXP_REZAGOS, EXP_VECINOS, RAIZ, SEMILLA, SUFIJO, cargar_entrenamiento, evaluar, pliegues_eleccion_reporte, preparar_prueba
 from modelo_interpretable import CONDICIONES
 
 P = CFG["modelos"]["lgbm"]
 FAMILIAS = json.loads((RAIZ / "data" / "features" / "familias.json").read_text())
-X_COLS = [c for fam, cols in FAMILIAS.items() if fam != "vecinos" or EXP_VECINOS for c in cols]
+EXPERIMENTOS = {"vecinos": EXP_VECINOS, "revision": EXP_REVISION, "rezagos_extra": EXP_REZAGOS, "dinamica": EXP_DINAMICA}     # familias que solo entran con su bandera
+X_COLS = [c for fam, cols in FAMILIAS.items() if EXPERIMENTOS.get(fam, True) for c in cols]
 COLUMNAS = ["station_id", "target_time_utc", "error_c", "obs_interpolada"] + X_COLS
 GRILLA = [dict(num_leaves=h, objective=o) for h, o in itertools.product(P["num_leaves"], P["objetivos"])]
 CORTES = list(range(P["paso_arboles"], P["max_arboles"] + 1, P["paso_arboles"]))

@@ -21,8 +21,15 @@ SEMILLA = CFG["semilla"]
 HORIZONTES_REPORTE = (1, 3, 6, 12, 24, 48)
 # Experimento (no es parte del producto): con --vecinos los modelos suman la familia 5 de features.py y
 # sus salidas llevan el sufijo _exp_vecinos, sin pisar las del producto. Ver DECISIONES.md, «Familia 5».
-EXP_VECINOS = "--vecinos" in sys.argv
-SUFIJO = "_exp_vecinos" if EXP_VECINOS else ""
+# --todas: todas las familias experimentales juntas y el Ridge ve TODAS las columnas (sufijo _exp_todas).
+EXP_TODAS = "--todas" in sys.argv
+EXP_VECINOS = "--vecinos" in sys.argv or EXP_TODAS
+# Experimento de la familia 6 (revisión del pronóstico): con --revision, sufijo _exp_revision. Se combinan.
+EXP_REVISION = "--revision" in sys.argv or EXP_TODAS
+EXP_REZAGOS = "--rezagos" in sys.argv or EXP_TODAS     # familia 7, rezagos extra (mismo esquema)
+EXP_DINAMICA = "--dinamica" in sys.argv or EXP_TODAS   # familia 8, dinámica (mismo esquema)
+SUFIJO = "_exp_todas" if EXP_TODAS else (("_exp_vecinos" if EXP_VECINOS else "") + ("_exp_revision" if EXP_REVISION else "")
+                                         + ("_exp_rezagos" if EXP_REZAGOS else "") + ("_exp_dinamica" if EXP_DINAMICA else ""))
 
 
 def pliegues_eleccion_reporte():

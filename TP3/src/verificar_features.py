@@ -11,7 +11,8 @@ import pandas as pd
 
 from sklearn.neighbors import BallTree
 
-from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM, VEC
+from features import ALFAS, RETRASO, k_dias, FAMILIAS, DIAS_ANOM, MIN_DIAS_ANOM, VEC, REVISION_H, REZAGOS_LARGOS_H, VENTANAS_1H, \
+    VENTANAS_STD, DISP_H, MIN_DISP, AMP_H, MIN_AMP
 
 RAIZ = Path(__file__).resolve().parents[1]
 H = pd.Timedelta(hours=1)
@@ -32,7 +33,7 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     # (2) recálculo independiente en una muestra de estaciones
     est = rng.choice(F["station_id"].unique(), n_estaciones, replace=False)
     P = pd.concat([pd.read_parquet(p, columns=["station_id", "target_time_utc", "horizon_target_hours",
-                                                "temperature_forecast_c", "error_c", "obs_interpolada",
+                                                "temperature_forecast_c", "dewpoint_forecast_c", "error_c", "obs_interpolada",
                                                 "forecast_generated_at_utc", "latitude", "longitude"])
                    for p in sorted((RAIZ / "data/pares").glob("*.parquet"))], ignore_index=True)
     P["station_id"] = P["station_id"].astype(str)
@@ -49,6 +50,12 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     gen = P.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["forecast_generated_at_utc"]
     gen = gen[~gen.index.duplicated()]
     tmp = tmp[~tmp.index.duplicated()]
+    rocp = P.set_index(["station_id", "target_time_utc", "horizon_target_hours"])["dewpoint_forecast_c"]
+    rocp = rocp[~rocp.index.duplicated()]
+    oh = pd.read_parquet(RAIZ / "data/obs_horaria.parquet")
+    obs = oh[~oh["obs_interpolada"]].assign(station_id=lambda x: x["station_id"].astype(str)) \
+            .set_index(["station_id", "target_time_utc"])["temp_obs_c"]
+    roc = pd.read_parquet(RAIZ / "data/obs_rocio.parquet").set_index(["station_id", "target_time_utc"])["dewpoint_observed_c"]
     diario = real.assign(dia=real["target_time_utc"].dt.normalize(), hora=real["target_time_utc"].dt.hour) \
                  .groupby(["station_id", "hora", "dia"])["error_c"].mean()
 
@@ -66,8 +73,9 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
 
     M = F[F["station_id"].isin(est)].sample(n_filas, random_state=semilla)
     errores = {c: 0 for c in ["err_ult", "err_media3", "err_media6", "err_ayer", "pendiente_pron", "temp_anom"]
-               + FAMILIAS["sesgo_ewma"] + FAMILIAS["vecinos"]}
-    anom_posterior = 0
+               + FAMILIAS["sesgo_ewma"] + FAMILIAS["vecinos"] + FAMILIAS["revision"] + FAMILIAS["rezagos_extra"]
+               + FAMILIAS["dinamica"]}
+    anom_posterior = rev_posterior = 0
     for _, r in M.iterrows():
         s, T, h = r["station_id"], r["target_time_utc"], int(r["h"])
         fuente = T - (h + RETRASO) * H
@@ -91,6 +99,34 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
             g = gen.get((s, T - 24 * k * H, h), pd.NaT)
             if not pd.isna(g) and g > r["forecast_generated_at_utc"]:
                 anom_posterior += 1
+        # familia 7: rezagos largos (mismo horizonte) y error del pronóstico a 1 h de la propia estación
+        for k in REZAGOS_LARGOS_H:
+            esperados[f"err_hace{k}h"] = e(s, T - (h + k) * H, h)
+        esperados["err1h_ult"] = e(s, fuente, 1)
+        for v, m in VENTANAS_1H:
+            vals = np.array([e(s, fuente - j * H, 1) for j in range(v)])
+            esperados[f"err1h_media{v}"] = np.nanmean(vals) if (~np.isnan(vals)).sum() >= m else np.nan
+        # familia 6: pronóstico para la misma hora T con horizonte h+k; tiene que haberse emitido antes
+        for k in REVISION_H:
+            esperados[f"rev_{k}h"] = f - tmp.get((s, T, h + k), np.nan)
+            g = gen.get((s, T, h + k), pd.NaT)
+            if not pd.isna(g) and g > r["forecast_generated_at_utc"]:
+                rev_posterior += 1
+        # familia 8: dinámica
+        o = lambda t: obs.get((s, t), np.nan)
+        esperados["obs_tend3h"] = o(fuente) - o(fuente - 3 * H)
+        esperados["err1h_tend3h"] = e(s, fuente, 1) - e(s, fuente - 3 * H, 1)
+        esperados["salto_obs"] = f - o(fuente)
+        ro = roc.get((s, fuente), np.nan)
+        esperados["err_rocio_ult"] = ro - rocp.get((s, fuente, h), np.nan)
+        esperados["err_rocio_1h"] = ro - rocp.get((s, fuente, 1), np.nan)
+        for v, m in VENTANAS_STD:
+            vals = np.array([e(s, fuente - j * H, h) for j in range(v)])
+            esperados[f"err_std{v}"] = np.nanstd(vals) if (~np.isnan(vals)).sum() >= m else np.nan
+        vals = np.array([tmp.get((s, T, h + j), np.nan) if h + j <= 48 else np.nan for j in range(DISP_H + 1)])
+        esperados["dispersion_emis"] = np.nanstd(vals) if (~np.isnan(vals)).sum() >= MIN_DISP else np.nan
+        vals = np.array([tmp.get((s, T + j * H, h + j), np.nan) for j in range(-AMP_H, AMP_H + 1)])
+        esperados["amplitud_pron"] = np.nanmax(vals) - np.nanmin(vals) if (~np.isnan(vals)).sum() >= MIN_AMP else np.nan
         dmax = (T - int(k_dias(np.array([h]))[0]) * pd.Timedelta(days=1)).normalize()
         for al in ALFAS:
             esperados[f"sesgo_ewma_{int(round(al * 100)):02d}"] = ewma(s, T.hour, dmax, al)
@@ -102,7 +138,8 @@ def main(n_estaciones=25, n_filas=1500, semilla=42):
     for c, n in errores.items():
         print(f"  {c:<16} discrepancias: {n}")
     print(f"  temp_anom con una fuente emitida después de la fila: {anom_posterior}")
-    assert sum(errores.values()) == 0 and anom_posterior == 0
+    print(f"  revisión con un pronóstico emitido después de la fila: {rev_posterior}")
+    assert sum(errores.values()) == 0 and anom_posterior == 0 and rev_posterior == 0
 
     # (3) noche: control físico de la elevación solar (independiente de la fórmula)
     hs = (np.degrees(np.arctan2(F["hora_solar_sin"], F["hora_solar_cos"])) / 15) % 24
