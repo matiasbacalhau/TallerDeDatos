@@ -21,7 +21,8 @@ OLS sale de la misma matriz XᵀX que usa ridge_gram.Gram (con α = 0). La matri
 (solución de norma mínima): la predicción y el aporte de cada variable no dependen de cuál solución se tome, porque
 la colinealidad es interna a cada variable.
 
-Uso:  .venv/bin/python src/modelo_rfe.py
+Uso:  .venv/bin/python src/modelo_rfe.py                 (RFE, curva y reporte)
+      .venv/bin/python src/modelo_rfe.py --pesos-ridge   (peso por variable del Ridge, para la comparación)
 """
 import json
 import re
@@ -153,6 +154,25 @@ def curvas(dis, coef, variables, puntos=60):
     return filas
 
 
+def pesos_ridge():
+    """Peso por variable (misma medida que RFE) del Ridge del producto en los pliegues de reporte, para comparar
+    cuán concentrado está cada modelo. Lee los coeficientes del Ridge (data/resultados) recién acá, al final.
+    Sus columnas son un subconjunto de la matriz de 8 familias con el mismo escalado (misma submuestra y semilla)."""
+    B = pd.read_csv(RAIZ / "data" / "resultados" / "interpretable_coeficientes.csv", index_col=0)
+    _, reporte = pliegues_eleccion_reporte()
+    filas = []
+    for k, (tr, te) in reporte:
+        dis, g, n, _ = preparar(k, tr, te)
+        faltan = set(B.index) - set(dis.nombres)
+        assert not faltan, f"columnas del Ridge que no están en la matriz de 8 familias: {faltan}"
+        coef = B[f"pliegue_{k}"].reindex(dis.nombres).fillna(0.0).to_numpy()
+        v = variable_de(dis)
+        vivas = sorted(set(v[coef != 0]))
+        filas += [{"pliegue": k, "variable": x, "peso_C": p} for x, p in pesos(g, n, coef, v, vivas).items()]
+        print(f"  pliegue {k}: {len(vivas)} variables del Ridge", flush=True)
+    pd.DataFrame(filas).to_csv(SALIDA / "pesos_ridge.csv", index=False)
+
+
 # --- main --------------------------------------------------------------------------------------------------------
 def main():
     SALIDA.mkdir(parents=True, exist_ok=True)
@@ -228,4 +248,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    pesos_ridge() if "--pesos-ridge" in sys.argv else main()
