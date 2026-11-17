@@ -1,0 +1,5 @@
+modelo,amplitud_hora,desvio_entre_estaciones,error_medio
+B0,2.615,0.494,0.048
+B2,0.487,0.353,0.092
+lineal,0.409,0.318,0.027
+lgbm,0.333,0.325,0.048

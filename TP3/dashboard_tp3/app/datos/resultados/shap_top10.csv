@@ -1,0 +1,11 @@
+variable,shap_abs_medio_C
+pendiente_pron,0.23
+viento_vel,0.15
+sesgo_ewma_30,0.15
+condicion,0.119
+prob_lluvia,0.115
+sesgo_ewma_20,0.112
+dep_rocio,0.106
+hora_solar_sin,0.093
+hora_solar_cos,0.078
+temp_anom,0.072
