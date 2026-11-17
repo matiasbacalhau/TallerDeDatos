@@ -243,6 +243,38 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
 - **Respuesta a la pregunta del producto:** la caja negra con toda la información es mejor de forma consistente, pero por poco: 0,05 °C (≈ 4 % del MAE del Ridge). El Ridge de caja de cristal ya captura la mayor parte de la mejora sobre el NWS (11,7 % contra 15,0 % de LightGBM).
 - Salida completa: `salidas/modelos_finales.txt`.
 
+### Experimento: modelo explicativo OLS con selección por RFE (17/11/2026, rama `tp3-ols-rfe`)
+
+Segundo modelo de caja de cristal, independiente del Ridge. Código: `src/modelo_rfe.py`. Lectura: `notebooks/rfe_ols.ipynb`. Salidas: `salidas/rfe/`.
+
+- **Qué cambia:** solo el método. El dataset y la matriz de diseño son los mismos (`Disenio` con las 8 familias). LightGBM, `features.py` y el Ridge del producto no se tocan.
+- **Independencia del Ridge:** no se usan su α, su ablación ni sus 5 familias. Los resultados del Ridge y de LightGBM se leen recién en la tabla final.
+- **Estimador:** regresión lineal sin penalización (OLS). La matriz es singular (las bases spline y los indicadores suman 1), así que se resuelve con la seudoinversa. La predicción y el aporte de cada variable son únicos; los β sueltos, no.
+- **Unidad que se elimina:** la variable de `features.py`, con todas sus columnas de diseño. Son 50 variables.
+- **Orden:** RFE clásico. En cada paso se reentrena y sale la variable con menor desvío de su aporte Σβx en el entrenamiento. El peso se promedia entre los pliegues 1–2, así hay un solo orden.
+- **Cuántas quedan:** el conjunto más chico que, contra el mejor punto de la curva, no empeora más de 0,005 °C de promedio ni 0,010 °C en ningún pliegue de elección. Son los umbrales del grupo.
+- **Resultado en elección:**
+  - OLS con las 50 variables: 1,281 °C.
+  - Mejor punto: 31 variables, 1,270 °C.
+  - **Elegido: 21 variables**, 1,274 °C.
+  - La curva es irregular por debajo de ~15 variables.
+- **Las 21:** 10 de base, los 4 sesgos EWMA, `pendiente_pron`, `err_ayer`, `rev_12h`, `err1h_ult` y 3 de dinámica (`obs_tend3h`, `err1h_tend3h`, `salto_obs`). **Sale `err_ult`**: su peso lo absorbe `err1h_ult`, que dice casi lo mismo.
+- **MAE en los pliegues de reporte 3–5** (°C, todos los días):
+
+  | Horizonte | B2 | OLS + RFE | Ridge | LightGBM |
+  |---|---|---|---|---|
+  | todos | 1,441 | 1,369 | 1,361 | **1,310** |
+  | 1 h | 1,294 | 1,150 | 1,063 | **1,034** |
+  | 6 h | 1,325 | 1,224 | 1,220 | **1,154** |
+  | 24 h | 1,430 | 1,368 | 1,365 | **1,312** |
+  | 48 h | 1,598 | 1,542 | 1,539 | **1,517** |
+
+- **Por día (15 días):**
+  - Contra el Ridge, OLS + RFE pierde por +0,008 °C (IC95 +0,000 a +0,015). Gana 5 de 15 días, p = 0,064. Con historia completa empatan (+0,002, p = 0,81).
+  - Contra B2 gana 13 de 15 días.
+- **Lectura:** con 21 variables queda prácticamente empatado con el Ridge en todos los horizontes salvo 1 h, donde pierde 0,09 °C. Esa pérdida es el `err_ult` que RFE sacó. Los 4 sesgos EWMA cambian de signo entre pliegues (33 % de sus columnas): son colineales y OLS no los encoge.
+- **Decisión:** pendiente del grupo. El Ridge del producto no cambia.
+
 ### Decisiones de implementación y su costo (17/11/2026)
 
 Decisiones tomadas al implementar la experimentación y los pliegues anclados (rama `tp3-experimentos`), revisadas por el grupo. «Costo» = qué se pierde si la decisión resultara equivocada.

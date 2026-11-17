@@ -1,0 +1,20 @@
+OLS + RFE. Pliegues de elección: [1, 2]
+  pliegue 1: 942,505 filas de entrenamiento, 156 columnas de diseño
+  pliegue 2: 964,327 filas de entrenamiento, 156 columnas de diseño
+
+Curva (MAE medio, elección): todas (50) = 1.2806 · mejor (31) = 1.2701 · elegido (21) = 1.2738
+Variables elegidas: prob_lluvia, condicion, enfriamiento_nocturno, hora_solar, temp_pron, elev_solar, hum_pron, err_ayer, sesgo_ewma_05, sesgo_ewma_10, sesgo_ewma_20, sesgo_ewma_30, rev_12h, err1h_ult, obs_tend3h, err1h_tend3h, salto_obs, pendiente_pron, temp_anom, dep_rocio, viento_vel
+  reporte, pliegue 3: 2,332,008 filas de prueba
+  reporte, pliegue 4: 2,284,200 filas de prueba
+  reporte, pliegue 5: 2,133,743 filas de prueba
+
+MAE (°C), pliegues de reporte, todos los días de prueba:
+modelo        B0     B2  ols_rfe
+horizonte                       
+todos      1.541  1.441    1.368
+1          1.380  1.295    1.150
+6          1.421  1.326    1.224
+24         1.536  1.430    1.367
+48         1.687  1.601    1.545
+
+Salidas en salidas/rfe/

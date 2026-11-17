@@ -1,0 +1,68 @@
+{
+ "n_variables": 21,
+ "n_variables_mejor_punto": 31,
+ "variables": [
+  "prob_lluvia",
+  "condicion",
+  "enfriamiento_nocturno",
+  "hora_solar",
+  "temp_pron",
+  "elev_solar",
+  "hum_pron",
+  "err_ayer",
+  "sesgo_ewma_05",
+  "sesgo_ewma_10",
+  "sesgo_ewma_20",
+  "sesgo_ewma_30",
+  "rev_12h",
+  "err1h_ult",
+  "obs_tend3h",
+  "err1h_tend3h",
+  "salto_obs",
+  "pendiente_pron",
+  "temp_anom",
+  "dep_rocio",
+  "viento_vel"
+ ],
+ "familias": {
+  "prob_lluvia": "base",
+  "condicion": "base",
+  "enfriamiento_nocturno": "base",
+  "hora_solar": "base",
+  "temp_pron": "base",
+  "elev_solar": "base",
+  "hum_pron": "base",
+  "err_ayer": "rezagos",
+  "sesgo_ewma_05": "sesgo_ewma",
+  "sesgo_ewma_10": "sesgo_ewma",
+  "sesgo_ewma_20": "sesgo_ewma",
+  "sesgo_ewma_30": "sesgo_ewma",
+  "rev_12h": "revision",
+  "err1h_ult": "rezagos_extra",
+  "obs_tend3h": "dinamica",
+  "err1h_tend3h": "dinamica",
+  "salto_obs": "dinamica",
+  "pendiente_pron": "pendiente",
+  "temp_anom": "base",
+  "dep_rocio": "base",
+  "viento_vel": "base"
+ },
+ "pliegues_eleccion_fechas": [
+  [
+   "2026_09_30",
+   "2026_10_01",
+   "2026_10_02",
+   "2026_10_03",
+   "2026_10_04"
+  ],
+  [
+   "2026_10_05",
+   "2026_10_06",
+   "2026_10_07",
+   "2026_10_08",
+   "2026_10_09"
+  ]
+ ],
+ "umbral_promedio_c": 0.005,
+ "umbral_pliegue_c": 0.01
+}
