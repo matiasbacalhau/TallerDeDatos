@@ -387,6 +387,43 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
 - **Respuesta a la pregunta del producto:** la caja negra con toda la información es mejor de forma consistente, pero por poco: 0,05 °C (≈ 4 % del MAE del Ridge). El Ridge de caja de cristal ya captura la mayor parte de la mejora sobre el NWS (11,7 % contra 15,0 % de LightGBM).
 - Salida completa: `salidas/modelos_finales.txt`.
 
+### Decisiones de implementación y su costo (17/11/2026)
+
+Decisiones tomadas al implementar la experimentación y los pliegues anclados (rama `tp3-experimentos`), revisadas por el grupo. «Costo» = qué se pierde si la decisión resultara equivocada.
+
+| # | Decisión | Por qué | Costo si está mal |
+|---|---|---|---|
+| 1 | El Ridge elige α con una sola matriz XᵀX por pliegue (`src/ridge_gram.py`), no reentrenando scikit-learn por cada α | Mismo resultado (test contra scikit-learn) y las 8 ablaciones tardan minutos en lugar de ~3 h | Elegir un α distinto al de scikit-learn; lo cubre el test |
+| 2 | Función `contribuciones()`: aporte de cada familia fila por fila | La necesita el control de que los aportes suman la predicción | Ninguno |
+| 3 | Grilla de α del Ridge de 1 a 10⁷ y submuestra de 1 M de filas; los 4 sesgos EWMA entran como columnas (ya no se elige uno) | Es la especificación del Ridge con todas las familias; la matriz es ancha y hay 8 GB de RAM | Grilla distinta a la anterior |
+| 4 | En interpretación y dashboard el Ridge entrena con su propia submuestra de 1 M de filas (LightGBM, con 2 M) | Con 8 GB de RAM, la matriz ancha con 2 M de filas no entra | El Ridge usa menos filas que LightGBM (igual que en el reporte) |
+| 5 | Redundancia entre familias = mayor correlación de Spearman entre variables de cada par de familias | La exploración va antes que los modelos | No capta redundancia conjunta (solo de a pares); es descriptiva y no decide |
+| 6 | Todas las variantes × α se calculan en una sola pasada por pliegue | Memoria | Ninguno |
+| 7 | Funciones `mapa_correlaciones()` (variables × variables) y `evaluar_detalle()` (MAE por horizonte y segmento) | El mapa de correlaciones lo pidió el grupo; la tabla final pide el detalle | Ninguno |
+| 8 | Las figuras de `experimentos.ipynb` se muestran desde el PNG guardado | `interpretar.py` fija el backend de matplotlib en `Agg` y los gráficos no aparecían | Ninguno |
+| 9 | No se versiona el log de nbconvert | La salida queda en las celdas de la notebook | Ninguno |
+| 10 | `interpretable_coeficientes.csv` es solo numérico; la familia de cada columna va en `interpretable_familia_de_columna.csv` | `comparacion_modelos.ipynb` lo lee como numérico | Ninguno |
+| 11 | `interpretable_eleccion.csv` y el JSON de hiperparámetros conservan su formato anterior (`sesgo` = «los 4 (lineales)»); la grilla completa va en `interpretable_grilla_alpha.csv` | No reescribir celdas de `comparacion_modelos.ipynb` | La columna `sesgo` de ese CSV no es el error medio (igual que antes) |
+| 12 | En `comparacion_modelos.ipynb` solo se agregó una nota arriba | No reescribir celdas existentes | El gráfico «Mejora sobre B0 por pliegue» muestra los pliegues 1–4, no el 5 (sí está en las tablas) |
+| 13 | El arreglo de la clave de caché de LightGBM no tiene test propio | Es la misma lógica que la del Ridge, que sí tiene test | LightGBM reentrena de más después de un hueco en los datos |
+| 14 | A los JSON de hiperparámetros ya elegidos se les agregaron las fechas de los pliegues de elección, en lugar de volver a elegir (24 min) | Se eligieron con exactamente esos pliegues (fechas verificadas) | Ninguno: reentrenado con resultados idénticos |
+
+**Arreglos de la revisión independiente** (cada uno con un test que falló antes del arreglo):
+- La clave de caché de cada pliegue solo incluye los días con historia incompleta de **su** bloque de prueba: un día nuevo después de un hueco ya no invalida los pliegues anteriores.
+- La clave incluye la huella del código del modelo y las columnas de cada familia: editar el modelo ya no sirve resultados viejos.
+- Los hiperparámetros congelados guardan las fechas de los pliegues de elección: si aparece tarde un día y los bloques se corren, se vuelven a elegir.
+- El spec decía devolver la familia de menor costo al confirmar el recorte; el código devuelve la de mayor. Se corrigió el spec.
+
+**Pendientes conocidos (no se arreglaron):**
+
+| Pendiente | Efecto |
+|---|---|
+| `interpretar.py` asume que el Ridge tiene base, pendiente y rezagos | Falla si una regla futura saca alguna de esas familias |
+| La ablación «sin base» conserva noche, condición y horizonte a través de las interacciones | «Sin base» no es del todo puro; no cambia la decisión (sacarla empeora 0,017 °C) |
+| α se elige en float64 y el reporte ajusta scikit-learn en float32 | Despreciable con α = 10⁵; no garantizado con α = 1 |
+| Pico de memoria de ~3–4 GB al transformar 1 M de filas de entrenamiento | Es el paso con más riesgo en 8 GB de RAM |
+| `comparar_modelos.py` no verifica que el LightGBM guardado corresponda a los datos actuales | Si solo se reentrena el Ridge, compara un Ridge nuevo con un LightGBM viejo; el orden del pipeline lo evita |
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.
