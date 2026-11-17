@@ -335,6 +335,19 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
 - **Decisión:** no entra al producto. LightGBM no mejora de forma significativa y el Ridge empeora. Pendiente: correr cada familia por separado para ver cuál explica la mejora de LightGBM a 1 h.
 - **Comparación:** sección 14 de `notebooks/comparacion_modelos.ipynb`. `comparar_modelos.py --todas` entrena cada modelo con su propia submuestra (Ridge 10⁶, LightGBM 2·10⁶ filas).
 
+### Experimentación por familias y regla de recorte del Ridge (17/11/2026)
+
+- **Orden:** la experimentación va **antes** del modelo final y decide qué familias usa el Ridge. LightGBM se entrena siempre con las 8 familias: la pregunta del producto es si un modelo de caja negra con toda la información es sustancialmente mejor que uno regularizado y de caja de cristal. Los dos modelos finales se comparan contra el NWS crudo y los baselines.
+- **Datos de los experimentos:** fecha de corte congelada (09/11/2026). Los días posteriores no reabren los experimentos.
+- **Producto:** pliegues anclados al calendario. Un día nuevo agrega un pliegue y no cambia los anteriores. Los hiperparámetros se eligen una vez en los primeros pliegues y quedan congelados.
+- **Recorrido por familia (1 a 8):** hipótesis experta → exploración (correlaciones, boxplots, redundancia) → Ridge con todas las familias → Ridge sin cada familia. Después se decide si conviene el formato acumulativo.
+- **Regla de recorte (fijada antes de ver resultados):** una familia se saca del Ridge si, sin ella, el MAE promedio de los pliegues de elección no empeora en más de **0,005 °C** y en ningún pliegue de elección empeora en más de **0,010 °C**.
+  - **Por qué antes:** si el umbral se elige mirando las tablas, se termina eligiendo el que favorece el resultado esperado. Escrita antes, la regla se puede defender, repetir y aplicar sola con datos nuevos.
+  - **Por qué 0,005 °C:** es menos del 0,5 % del MAE (≈ 1,3 °C) y está por debajo del ruido entre días ya medido (con `--todas`, LightGBM mejoró 0,012 °C por día con p = 0,12). Lo que cambia menos que eso no se puede distinguir con estos datos y solo resta legibilidad.
+  - **Por qué 0,010 °C por pliegue:** no sacar una familia que en promedio no importa, pero en un período concreto sí ayuda. Duplica el umbral promedio para tolerar el ruido de un solo pliegue.
+  - El grupo puede apartarse de la regla solo dejando escrita la razón.
+- Diseño completo: `docs/superpowers/specs/2026-11-17-experimentos-y-pliegues-anclados-design.md`.
+
 ### Dirección del viento (10/11/2026)
 
 - **Hipótesis (del grupo):** el viento trae las propiedades del lugar de donde viene (mar o montaña). Por eso el efecto depende de la geografía de cada estación y se evalúa por **estación × sector** (8 sectores + calma), no con un coeficiente global.
