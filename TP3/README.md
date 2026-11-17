@@ -59,6 +59,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python src/comparar_modelos.py    # ¿las diferencias entre modelos superan el ruido?
 .venv/bin/python src/interpretar.py         # Etapa B: curvas, SHAP, sesgo restante y techo (figuras/)
 .venv/bin/python src/preparar_dashboard.py  # Etapa C: datos y bandas de confianza del dashboard
+.venv/bin/python src/preparar_resultados_dashboard.py  # Etapa C: tablas de las pestañas de comparación
 .venv/bin/streamlit run app/dashboard.py    # Etapa C: abre el dashboard en http://localhost:8501
 ```
 
@@ -81,6 +82,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 - `src/comparar_modelos.py` — prueba de significancia entre modelos con el día de prueba como unidad.
 - `src/interpretar.py` — Etapa B: figuras de interpretación en `figuras/`.
 - `src/preparar_dashboard.py`, `app/dashboard.py`, `.streamlit/config.toml` — Etapa C: dashboard de confianza del pronóstico.
+- `src/preparar_resultados_dashboard.py` — tablas de `app/datos/resultados/` (búsqueda de hiperparámetros, versiones, pruebas) para las pestañas que comparan Ridge y LightGBM.
 - `src/diagnostico_viento.py` — ¿la dirección del viento explica error por estación? (pliegues de elección).
 - `config.yaml` — parámetros (rutas, hueco máximo de interpolación, calidad, validación y ancla de los pliegues, corte y umbrales de los experimentos, familias del Ridge, modelo producto).
 - `tests/` — tests con pytest.

@@ -378,3 +378,11 @@ Código: `app/dashboard.py`, con los datos de `src/preparar_dashboard.py`. Se co
   - **Sin niveles de confianza:** se descartó la etiqueta «alta / media / baja» (en `main`, el ancho de la banda variaba poco: 3,1–4,7 °C según horizonte y condición).
 - **Hora solar en lugar de hora civil:** no tenemos la zona horaria de cada estación, y AL, MS y parte de TN, KY y FL están en la hora Central. El filtro y los gráficos usan la hora solar local, la misma que usan los modelos, y se rotula así.
 - **Límite conocido:** al cambiar los filtros, la estación elegida puede volver a la primera de la lista.
+
+### Pestañas de comparación de modelos (17/11/2026)
+
+- **Pedido:** comparar el Ridge (Gram) y LightGBM con sus versiones, variables, búsqueda de hiperparámetros y regularización. El dashboard pasa a tener 8 pestañas: **Hallazgos** (la narrativa que pide la consigna), **Resumen**, **Ridge (Gram)**, **LightGBM**, **Ridge vs LightGBM**, **Monitoreo** (la vista anterior, sin cambios de contenido), **Variables** y **Datos y validación** (días excluidos, pliegues walk-forward, baselines B0–B3 y MAE por pliegue).
+- **Datos de las pestañas nuevas:** `src/preparar_resultados_dashboard.py` lee las salidas versionadas (`salidas/modelos_finales.txt`, `log_lgbm.txt`, `log_ridge_todas_familias.txt`) y escribe tablas chicas en `app/datos/resultados/`. También se leen `salidas/experimentos/*.csv` y las figuras de `figuras/` y `salidas/experimentos/figuras/`. Así siguen sin hacer falta `data/` ni el pipeline.
+- **Color por modelo, fijo en todas las pestañas:** Ridge azul #1d5fbf, LightGBM ámbar #c56a00 (validados para daltonismo: ΔE 26,8); NWS y baselines en gris. En Monitoreo, la línea y la banda corregidas toman el color del modelo elegido.
+- **Versiones anteriores (rama `main`):** se muestran en tablas con la aclaración de que se midieron con otros pliegues y no son comparables con las finales.
+- **Límite:** de la grilla de LightGBM solo están versionadas las 5 mejores combinaciones (log), no la curva completa por cantidad de árboles (`data/resultados/lgbm_eleccion.csv` no está en el repo).

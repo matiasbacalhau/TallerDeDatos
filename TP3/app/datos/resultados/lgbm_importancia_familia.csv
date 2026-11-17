@@ -1,0 +1,9 @@
+familia,ganancia_pct
+base,57.2
+sesgo_ewma,18.0
+pendiente,11.7
+dinamica,4.1
+revision,3.7
+rezagos,2.7
+rezagos_extra,2.4
+vecinos,0.2

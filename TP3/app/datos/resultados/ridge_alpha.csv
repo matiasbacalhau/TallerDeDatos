@@ -1,0 +1,15 @@
+version,alpha,MAE_eleccion,elegido
+Ridge final (5 familias),1.0,1.2562,False
+Ridge final (5 familias),100.0,1.2542,False
+Ridge final (5 familias),1000.0,1.2539,False
+Ridge final (5 familias),10000.0,1.2515,False
+Ridge final (5 familias),100000.0,1.246,True
+Ridge final (5 familias),1000000.0,1.2574,False
+Ridge final (5 familias),10000000.0,1.3401,False
+Ridge con las 8 familias,1.0,1.2727,False
+Ridge con las 8 familias,100.0,1.2545,False
+Ridge con las 8 familias,1000.0,1.2545,False
+Ridge con las 8 familias,10000.0,1.252,False
+Ridge con las 8 familias,100000.0,1.2455,True
+Ridge con las 8 familias,1000000.0,1.2556,False
+Ridge con las 8 familias,10000000.0,1.3375,False

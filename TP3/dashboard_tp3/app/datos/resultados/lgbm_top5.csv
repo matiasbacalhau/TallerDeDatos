@@ -1,0 +1,6 @@
+combinacion,num_leaves,objetivo,arboles,MAE_eleccion,puesto
+hojas127_regression_l1,127,L1 (regression_l1),150,1.2126,1
+hojas127_regression_l1,127,L1 (regression_l1),200,1.2127,2
+hojas127_regression,127,L2 (regression),250,1.2132,3
+hojas127_regression_l1,127,L1 (regression_l1),250,1.2135,4
+hojas127_regression,127,L2 (regression),150,1.2136,5
