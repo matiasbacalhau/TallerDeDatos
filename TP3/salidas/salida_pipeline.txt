@@ -145,3 +145,75 @@ Resultados completos: data/resultados/baselines_por_pliegue.csv y baselines_resu
 ====================================================================================================
 PASO 5 de 6 · Variables para los modelos   (features.py)
 ====================================================================================================
+Calcula las variables que usan los modelos, solo con lo que se sabía al emitir cada pronóstico (nada del
+futuro). Familias que usan los modelos del producto:
+  base        el pronóstico mismo (temperatura, humedad, rocío, viento, lluvia, condición), horizonte,
+              hora del día, ubicación, altura del sol y si es de noche
+  pendiente   cuánto cambia la temperatura pronosticada alrededor de la hora objetivo
+  rezagos     últimos errores conocidos de la misma estación y el mismo horizonte
+  sesgo EWMA  sesgo habitual de la estación a esa hora, promediando días con más peso a los recientes
+Familias experimentales (se calculan, pero solo se usan al probarlas): vecinos, revisión, rezagos extra,
+dinámica.
+
+Estaciones vecinas (las 5 más cercanas a menos de 100 km, para la familia «vecinos»): 4,6 por estación
+en promedio; 0 de 519 estaciones no tienen ninguna a menos de esa distancia.
+Variables calculadas para 47 días → data/features/
+
+(paso 5 terminado en 206 s)
+
+====================================================================================================
+PASO 6 de 6 · Control independiente de las variables   (verificar_features.py)
+====================================================================================================
+Revisa las variables del paso anterior por otro camino: si el cálculo original tuviera un error, acá no
+coincidiría. Si algún control falla, el pipeline se detiene.
+
+1. Causalidad: de 27.818.020 filas, 0 usan un dato observado después de emitido el pronóstico → OK
+
+2. Recálculo a mano (pandas fila por fila, vecinas con otro método) de 1.500 filas al azar de 25 estaciones,
+   34 variables. Filas donde el valor original y el recalculado difieren en más de 0,001:
+   0 filas en todas las variables → OK
+   Variables que miran pronósticos anteriores (anomalía de temperatura, revisión): 0 usan un pronóstico emitido
+   después del de la fila → OK
+
+3. Altura del sol y noche (control físico, sin usar la fórmula del cálculo):
+   al mediodía solar el sol tiene que estar sobre el horizonte: altura mínima 29,0° → OK
+   a la medianoche solar tiene que estar debajo: altura máxima -37,3° → OK
+   horas de noche por día (mediana entre estaciones y días): 12,0 h;
+   entre 10 y 14 h es lo esperable en estas latitudes y fechas → OK
+
+Informativo (no detiene el pipeline):
+
+4. Variables sin valor (% de filas). Es esperable: las que miran errores pasados quedan vacías si no hubo
+   observación real en ese momento, y las que necesitan varios días previos, al comienzo del período.
+   base          temp_anom 6,5 %, hum_pron < 0,1 %
+   pendiente     pendiente_pron < 0,1 %
+   rezagos       err_ult 35,4 %, err_media3 32,7 %, err_media6 29,1 %, err_ayer 36,4 %
+   sesgo_ewma    sesgo_ewma_05 12,2 %, sesgo_ewma_10 12,2 %, sesgo_ewma_20 12,2 %, sesgo_ewma_30 12,2 %
+   vecinos       vec_err_ult 13,9 %, vec_err_1h 13,7 %
+   revision      rev_3h 6,5 %, rev_6h 12,9 %, rev_12h 25,4 %, rev_24h 50,5 %
+   rezagos_extra err_hace9h 35,9 %, err_hace12h 36,1 %, err_hace15h 36,3 %, err_hace18h 36,4 %,
+                 err_hace21h 36,5 %, err1h_ult 35,0 %, err1h_media2 26,0 %, err1h_media4 28,2 %,
+                 err1h_media8 29,4 %
+   dinamica      obs_tend3h 44,8 %, err1h_tend3h 45,2 %, salto_obs 34,8 %, err_rocio_ult 40,4 %,
+                 err_rocio_1h 40,1 %, err_std6 29,1 %, err_std24 24,7 %, dispersion_emis 4,2 %,
+                 amplitud_pron 0,7 %
+
+5. Condición del tiempo que pronosticó el NWS (sus textos agrupados por palabras clave), % de filas:
+   despejado   52,2 %
+   lluvia      12,8 %
+   parcial     12,5 %
+   nublado     11,9 %
+   tormenta     6,6 %
+   niebla       2,9 %
+   otro         1,1 %
+   nieve        0,1 %
+
+6. Viento sin dirección en el pronóstico: 18,7 % de las filas. Velocidad media pronosticada: 0,0 km/h
+   en esas filas contra 11,5 km/h en las que tienen dirección → la dirección falta porque el viento es calmo,
+   no por un dato perdido.
+
+(paso 6 terminado en 188 s)
+
+====================================================================================================
+Pipeline completo: los 6 pasos terminaron y todos los controles pasaron.
+Las líneas AVISO y ALARMA de arriba no detienen el pipeline, pero conviene leerlas.
