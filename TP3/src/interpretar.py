@@ -196,15 +196,16 @@ def main():
     rng = np.random.default_rng(SEMILLA)
     _, reporte = pliegues_eleccion_reporte()
     hp_lin = json.loads((RES / "interpretable_hiperparametros.json").read_text())
-    columnas = list(dict.fromkeys(MI.COLUMNAS + ML.COLUMNAS))
+    columnas = list(dict.fromkeys(MI.columnas_de(hp_lin["familias"]) + ML.COLUMNAS))
     acc = Acumulador()
     for j, (k, (tr, te)) in enumerate(reporte):
         A = cargar_entrenamiento(tr, columnas)
         T = preparar_prueba(te, tr, columnas)
         T = T[T["B2"].notna()].reset_index(drop=True)
-        dis, m = MI.ajustar(A, hp_lin["sesgo"])
+        dis, m = MI.ajustar(cargar_entrenamiento(tr, MI.columnas_de(hp_lin["familias"]), MI.P["max_filas"]),   # la submuestra del Ridge
+                             hp_lin["familias"], hp_lin["ridge_alpha"])
         gbm = lgb.Booster(model_file=str(RES / f"lgbm_pliegue_{k}.txt"))
-        pred = {"B0": np.zeros(len(T)), "B2": T["B2"].to_numpy(), "lineal": m.predict(dis.transform(T)),
+        pred = {"B0": np.zeros(len(T)), "B2": T["B2"].to_numpy(), "lineal": MI.predecir(dis, m.coef_, m.intercept_, T),
                 "lgbm": gbm.predict(ML.matriz(T))}
         acc.agregar(T, pred)
         if j == len(reporte) - 1:                      # el último pliegue tiene el entrenamiento más largo

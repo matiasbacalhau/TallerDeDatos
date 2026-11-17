@@ -42,13 +42,14 @@ def tramo(h):
 
 
 def predecir(pliegues, hp_lin, hp_gbm):
-    columnas = list(dict.fromkeys(MI.COLUMNAS + ML.COLUMNAS + ["temp_pron", "lat", "lon"]))
+    columnas = list(dict.fromkeys(MI.columnas_de(hp_lin["familias"]) + ML.COLUMNAS + ["temp_pron", "lat", "lon"]))
     params = {"num_leaves": hp_gbm["num_leaves"], "objective": hp_gbm["objective"]}
     partes = []
     for k, (tr, te) in pliegues:
         A = cargar_entrenamiento(tr, columnas)
         T = cargar_prueba(te, columnas).reset_index(drop=True)
-        dis, m = MI.ajustar(A, hp_lin["sesgo"])
+        dis, m = MI.ajustar(cargar_entrenamiento(tr, MI.columnas_de(hp_lin["familias"]), MI.P["max_filas"]),   # la submuestra del Ridge
+                             hp_lin["familias"], hp_lin["ridge_alpha"])
         gbm = ML.entrenar(A, params, hp_gbm["arboles"])
         f = T["temp_pron"].to_numpy(np.float32)
         partes.append(pd.DataFrame({
@@ -56,7 +57,7 @@ def predecir(pliegues, hp_lin, hp_gbm):
             "target_time_utc": T["target_time_utc"].to_numpy(), "horizonte": T["horizonte"].to_numpy(np.int8),
             "hora_solar": hora_solar(T), "condicion": T["condicion"].astype(str).to_numpy(),
             "nws": f, "obs": (f + T["error_c"].to_numpy(np.float32)).astype(np.float32),
-            "lineal": (f + m.predict(dis.transform(T))).astype(np.float32),
+            "lineal": (f + MI.predecir(dis, m.coef_, m.intercept_, T)).astype(np.float32),
             "lgbm": (f + gbm.predict(ML.matriz(T))).astype(np.float32)}))
         print(f"pliegue {k}: {len(T):,} filas de prueba", flush=True)
         del A, T
