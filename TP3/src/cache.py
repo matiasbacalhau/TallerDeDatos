@@ -22,6 +22,18 @@ def huella_dias(dias, carpeta=FEAT_DIR):
     return huellas
 
 
+def huella_archivos(rutas):
+    """sha256 del contenido de archivos de código: si se edita el modelo, cambia la clave y no se sirve un resultado viejo."""
+    h = hashlib.sha256()
+    for r in rutas:
+        h.update(Path(r).read_bytes())
+    return h.hexdigest()
+
+
+def fechas(dias):
+    return [f"{d:%Y_%m_%d}" for d in dias]
+
+
 def clave(**partes):
     return hashlib.sha256(json.dumps(partes, sort_keys=True, default=str).encode()).hexdigest()
 

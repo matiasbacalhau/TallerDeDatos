@@ -95,7 +95,7 @@ notebook llama funciones, no reimplementa modelos). La notebook se commitea ejec
 
    El Ridge final es «todas menos las que se sacan» y se reentrena con su búsqueda de α. Se confirma que su MAE en
    los pliegues de elección no empeora en más de 0,005 °C respecto del Ridge con todas. Si empeora (dos familias
-   que, cada una por separado, no hacían falta, pero sí juntas), se devuelve la de menor costo de sacarla y se
+   que, cada una por separado, no hacían falta, pero sí juntas), se devuelve la de MAYOR costo de sacarla (la que más ayuda) y se
    repite. La contribución y la estabilidad del paso 3 **explican** por qué una familia se va o se queda, pero no
    deciden. El grupo puede apartarse de la regla solo dejando escrita la razón en la notebook.
 

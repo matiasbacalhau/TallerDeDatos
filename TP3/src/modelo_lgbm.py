@@ -22,6 +22,7 @@ import itertools
 import json
 import sys
 import time
+from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -30,12 +31,13 @@ import pandas as pd
 import cache
 from formato import dec, n as n_
 from modelado import CFG, RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
-from modelo_interpretable import CONDICIONES, FAMILIAS, TODAS
+from modelo_interpretable import CONDICIONES, FAMILIAS, TODAS, fechas_eleccion
 
 P = CFG["modelos"]["lgbm"]
 VERSION = 2
 X_COLS = [c for cols in FAMILIAS.values() for c in cols]
 COLUMNAS = ["station_id", "target_time_utc", "error_c", "obs_interpolada"] + X_COLS
+CODIGO = cache.huella_archivos([Path(__file__), Path(__file__).with_name("modelado.py")])   # editar invalida la caché
 GRILLA = [dict(num_leaves=h, objective=o) for h, o in itertools.product(P["num_leaves"], P["objetivos"])]
 CORTES = list(range(P["paso_arboles"], P["max_arboles"] + 1, P["paso_arboles"]))
 
@@ -87,8 +89,8 @@ def pliegue_reporte(k, tr, te, params, n_arb):
     clave = cache.clave(tipo="lgbm", version=VERSION, params=params, arboles=n_arb, fijos={c: P[c] for c in (
         "learning_rate", "min_child_samples", "feature_fraction", "bagging_fraction", "lambda_l2")},
         max_filas=CFG["modelos"]["max_filas_entrenamiento"], semilla=SEMILLA, columnas=X_COLS,
-        entrena=[f"{d:%Y_%m_%d}" for d in tr], prueba=[f"{d:%Y_%m_%d}" for d in te],
-        huellas=cache.huella_dias(list(tr) + list(te)), historia_incompleta=sorted(dias_historia_incompleta()))
+        codigo=CODIGO, entrena=cache.fechas(tr), prueba=cache.fechas(te), huellas=cache.huella_dias(list(tr) + list(te)),
+        historia_incompleta=sorted(set(dias_historia_incompleta()) & set(cache.fechas(te))))   # solo los de ESTE pliegue
     res = cache.leer("lgbm", clave)
     if res is not None:
         return res, True
@@ -111,7 +113,7 @@ def main():
           f"pliegues que reportan: {[k for k, _ in reporte]}", flush=True)
 
     hp = json.loads(ruta_hp.read_text()) if ruta_hp.exists() else {}
-    if "--reelegir" in sys.argv or hp.get("familias") != TODAS:
+    if "--reelegir" in sys.argv or hp.get("familias") != TODAS or hp.get("pliegues_eleccion_fechas") != fechas_eleccion(eleccion):
         print(f"\nEligiendo hiperparámetros: {len(GRILLA)} combinaciones × cortes de {CORTES[0]} a {CORTES[-1]} árboles "
               "(criterio: MAE con historia completa)...", flush=True)
         G, crit, params, n_arb = elegir(eleccion)
@@ -120,7 +122,8 @@ def main():
         for (conf, n), v in crit.head(5).items():
             print(f"                  {conf:<32} {n:>7}   {dec(v, 4)}")
         ruta_hp.write_text(json.dumps({**P, **params, "arboles": n_arb, "familias": TODAS,
-                                       "pliegues_eleccion": [k for k, _ in eleccion]}))
+                                       "pliegues_eleccion": [k for k, _ in eleccion],
+                                       "pliegues_eleccion_fechas": fechas_eleccion(eleccion)}))
     else:
         params, n_arb = {"num_leaves": hp["num_leaves"], "objective": hp["objective"]}, hp["arboles"]
         print(f"\nHiperparámetros ya elegidos (congelados en {ruta_hp.relative_to(RAIZ)}): {nombre(params)}, "

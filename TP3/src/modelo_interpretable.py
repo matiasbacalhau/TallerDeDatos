@@ -59,6 +59,8 @@ SIEMPRE = ["station_id", "target_time_utc", "error_c", "obs_interpolada", "horiz
            "hora_solar_cos", "noche", "condicion"]               # evaluación, B2, interacciones y spline del horizonte
 POR_HORIZONTE = {"err_ult": "rezagos", "vec_err_1h": "vecinos"}  # su peso depende de la antelación
 BLOQUE = 200_000                                                 # filas por bloque al predecir (memoria)
+CODIGO = cache.huella_archivos([Path(__file__), Path(__file__).with_name("modelado.py"),
+                                 Path(__file__).with_name("ridge_gram.py")])   # editar el modelo invalida la caché
 SESGO = "los 4 (lineales)"      # antes se elegía UN sesgo exponencial; ahora entran los 4 como columnas
 
 
@@ -180,12 +182,22 @@ def contribucion_por_familia(dis, coef, X):
     return contribuciones(dis, coef, X).std()
 
 
-def hiperparametros_vigentes(ruta, familias):
-    """Los hiperparámetros guardados, o None si no existen o son de otro conjunto de familias."""
+def hiperparametros_vigentes(ruta, familias, eleccion_fechas=None):
+    """Los hiperparámetros guardados, o None si no existen, son de otro conjunto de familias o se eligieron con otros
+    días (por ejemplo, si apareció tarde un día y los bloques de elección se corrieron)."""
     if not Path(ruta).exists():
         return None
     hp = json.loads(Path(ruta).read_text())
-    return hp if hp.get("familias") == list(familias) else None
+    if hp.get("familias") != list(familias):
+        return None
+    if eleccion_fechas is not None and hp.get("pliegues_eleccion_fechas") != eleccion_fechas:
+        return None
+    return hp
+
+
+def fechas_eleccion(eleccion):
+    """Días de prueba de cada pliegue de elección (lo que determina con qué datos se eligieron los hiperparámetros)."""
+    return [cache.fechas(te) for _, (_, te) in eleccion]
 
 
 def mae_completa(T, preds):
@@ -231,11 +243,14 @@ def elegir_alpha(familias, eleccion, max_filas):
 
 
 def clave_pliegue(tipo, familias, alpha, tr, te, max_filas):
-    """Todo lo que determina el resultado de un pliegue: si nada cambió, se lee de la caché."""
-    return cache.clave(tipo=tipo, version=VERSION, familias=list(familias), alpha=alpha, max_filas=max_filas,
-                       semilla=SEMILLA, umbral_calma=P["umbral_calma_kmh"], entrena=[f"{d:%Y_%m_%d}" for d in tr],
-                       prueba=[f"{d:%Y_%m_%d}" for d in te], huellas=cache.huella_dias(list(tr) + list(te)),
-                       historia_incompleta=sorted(dias_historia_incompleta()))
+    """Todo lo que determina el resultado de un pliegue: si nada cambió, se lee de la caché. De la historia incompleta
+    entran solo los días de prueba de ESTE pliegue: un día nuevo después de un hueco no invalida pliegues anteriores."""
+    prueba = cache.fechas(te)
+    return cache.clave(tipo=tipo, version=VERSION, codigo=CODIGO, familias=list(familias),
+                       columnas={f: FAMILIAS[f] for f in familias}, alpha=alpha, max_filas=max_filas, semilla=SEMILLA,
+                       umbral_calma=P["umbral_calma_kmh"], entrena=cache.fechas(tr), prueba=prueba,
+                       huellas=cache.huella_dias(list(tr) + list(te)),
+                       historia_incompleta=sorted(set(dias_historia_incompleta()) & set(prueba)))
 
 
 def pliegue_reporte(k, tr, te, familias, alpha, max_filas):
@@ -263,7 +278,7 @@ def main():
     print("Modelo de caja de cristal (Ridge con curvas). Familias que usa:", ", ".join(familias))
     print(f"Pliegues que eligen la penalización: {[k for k, _ in eleccion]} · pliegues que reportan: {[k for k, _ in reporte]}")
 
-    hp = None if "--reelegir" in sys.argv else hiperparametros_vigentes(ruta_hp, familias)
+    hp = None if "--reelegir" in sys.argv else hiperparametros_vigentes(ruta_hp, familias, fechas_eleccion(eleccion))
     if hp is None:
         print("\nEligiendo la penalización α en los pliegues de elección (criterio: MAE con historia completa)...", flush=True)
         G, alpha, sel = elegir_alpha(familias, eleccion, max_filas)
@@ -273,7 +288,8 @@ def main():
         for a_, m_ in G.groupby("alpha")["MAE"].mean().items():
             print(f"  {a_:<10.0e} {dec(m_, 4)}" + ("   ← elegido" if a_ == alpha else ""))
         ruta_hp.write_text(json.dumps({**P, "familias": familias, "ridge_alpha": alpha, "sesgo": SESGO,
-                                       "pliegues_eleccion": [k for k, _ in eleccion]}))
+                                       "pliegues_eleccion": [k for k, _ in eleccion],
+                                       "pliegues_eleccion_fechas": fechas_eleccion(eleccion)}))
     else:
         alpha = hp["ridge_alpha"]
         print(f"\nPenalización ya elegida (congelada en {ruta_hp.relative_to(RAIZ)}): α = {alpha:.0e}. "

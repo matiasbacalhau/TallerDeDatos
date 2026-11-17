@@ -59,3 +59,48 @@ def test_hiperparametros_viejos_no_sirven(tmp_path):
     assert MI.hiperparametros_vigentes(ruta, MI.TODAS)["ridge_alpha"] == 1e5
     assert MI.hiperparametros_vigentes(ruta, MI.TODAS[:3]) is None
     assert MI.hiperparametros_vigentes(tmp_path / "no.json", MI.TODAS) is None
+
+
+DIAS_TR = [pd.Timestamp("2026-09-10") + pd.Timedelta(days=i) for i in range(18)]
+DIAS_TE = [pd.Timestamp("2026-09-30") + pd.Timedelta(days=i) for i in range(5)]
+
+
+def _sin_disco(monkeypatch, incompletos):
+    monkeypatch.setattr(MI.cache, "huella_dias", lambda dias, *a: {f"{d:%Y_%m_%d}": "x" for d in dias})
+    monkeypatch.setattr(MI, "dias_historia_incompleta", lambda: set(incompletos))
+
+
+def test_dia_incompleto_nuevo_no_invalida_pliegues_previos(monkeypatch):
+    _sin_disco(monkeypatch, {"2026_09_10"})
+    antes = MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000)
+    _sin_disco(monkeypatch, {"2026_09_10", "2026_11_13"})        # llega un día después de un hueco
+    assert MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000) == antes
+
+
+def test_dia_de_prueba_que_pasa_a_incompleto_invalida(monkeypatch):
+    _sin_disco(monkeypatch, set())
+    antes = MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000)
+    _sin_disco(monkeypatch, {"2026_10_01"})
+    assert MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000) != antes
+
+
+def test_cambio_de_columnas_de_una_familia_invalida(monkeypatch):
+    _sin_disco(monkeypatch, set())
+    antes = MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000)
+    monkeypatch.setitem(MI.FAMILIAS, "rezagos", MI.FAMILIAS["rezagos"][:-1])
+    assert MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000) != antes
+
+
+def test_cambio_de_codigo_invalida(monkeypatch):
+    _sin_disco(monkeypatch, set())
+    antes = MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000)
+    monkeypatch.setattr(MI, "CODIGO", "otra-huella")
+    assert MI.clave_pliegue("ridge", MI.TODAS, 1e5, DIAS_TR, DIAS_TE, 1000) != antes
+
+
+def test_hiperparametros_de_otros_pliegues_no_sirven(tmp_path):
+    ruta = tmp_path / "hp.json"
+    eleccion = [["2026_09_30", "2026_10_01"], ["2026_10_05"]]
+    ruta.write_text(json.dumps({"familias": MI.TODAS, "ridge_alpha": 1e5, "pliegues_eleccion_fechas": eleccion}))
+    assert MI.hiperparametros_vigentes(ruta, MI.TODAS, eleccion) is not None
+    assert MI.hiperparametros_vigentes(ruta, MI.TODAS, [["2026_09_29", "2026_09_30"], ["2026_10_05"]]) is None

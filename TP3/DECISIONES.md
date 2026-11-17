@@ -345,6 +345,7 @@ Código: `src/comparar_modelos.py`. Salidas en `data/resultados/comparacion_*.cs
   - **Por qué antes:** si el umbral se elige mirando las tablas, se termina eligiendo el que favorece el resultado esperado. Escrita antes, la regla se puede defender, repetir y aplicar sola con datos nuevos.
   - **Por qué 0,005 °C:** es menos del 0,5 % del MAE (≈ 1,3 °C) y está por debajo del ruido entre días ya medido (con `--todas`, LightGBM mejoró 0,012 °C por día con p = 0,12). Lo que cambia menos que eso no se puede distinguir con estos datos y solo resta legibilidad.
   - **Por qué 0,010 °C por pliegue:** no sacar una familia que en promedio no importa, pero en un período concreto sí ayuda. Duplica el umbral promedio para tolerar el ruido de un solo pliegue.
+  - **Confirmación conjunta:** las familias que la regla saca una por una se sacan juntas. Si juntas empeoran más de 0,005 °C (se reemplazan entre sí), se devuelve al modelo la de **mayor** costo de sacarla (la que más ayuda) y se vuelve a probar.
   - El grupo puede apartarse de la regla solo dejando escrita la razón.
 - Diseño completo: `docs/superpowers/specs/2026-11-17-experimentos-y-pliegues-anclados-design.md`.
 

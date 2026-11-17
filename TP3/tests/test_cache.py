@@ -51,3 +51,13 @@ def test_guardar_leer(tmp_path, monkeypatch):
 def test_leer_inexistente_devuelve_none(tmp_path, monkeypatch):
     monkeypatch.setattr(cache, "CARPETA", tmp_path / "cache")
     assert cache.leer("ridge", "no-existe") is None
+
+
+def test_huella_archivos_depende_del_contenido(tmp_path):
+    a = tmp_path / "a.py"
+    a.write_text("x = 1\n")
+    h = cache.huella_archivos([a])
+    a.write_text("x = 1\n")
+    assert cache.huella_archivos([a]) == h
+    a.write_text("x = 2\n")
+    assert cache.huella_archivos([a]) != h
