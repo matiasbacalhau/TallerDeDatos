@@ -1,0 +1,25 @@
+
+====================================================================================================
+PASO 1 de 6 · Preparar los datos   (preparar_datos.py)
+====================================================================================================
+Lee los CSV diarios (pronóstico del NWS + temperatura observada), une cada pronóstico con lo que
+realmente se midió y calcula el error de temperatura: error = observado − pronosticado, en °C.
+
+Archivos de entrada: 47 días, del 10/09/2026 al 29/10/2026.
+AVISO: no hay archivo para 3 días del período: 15/10, 27/10, 28/10. Esos días quedan fuera del análisis.
+Días leídos en esta corrida: 0 (los demás ya estaban procesados de corridas anteriores).
+
+Temperatura observada: una lectura por estación y hora (519 estaciones × 1.199 horas = 622.281 lecturas posibles)
+  con lectura real del NWS:        401.358  (64,5 %)
+  completadas por interpolación:    62.793  (10,1 %)  huecos de hasta 3 h entre dos lecturas reales
+  sin dato:                        158.130  (25,4 %)  huecos más largos: esas horas quedan sin error
+  lecturas repetidas entre archivos de días distintos: 0
+
+Tabla pronóstico-observación (una fila por estación × hora objetivo × horizonte de 1 a 48 h): 27.818.020 filas.
+Días recalculados en esta corrida: 0 (solo los nuevos o aquellos cuya observación cambió).
+
+(paso 1 terminado en 2 s)
+
+====================================================================================================
+PASO 2 de 6 · Control de calidad por día   (calidad_dias.py)
+====================================================================================================
