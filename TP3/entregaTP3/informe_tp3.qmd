@@ -1,0 +1,251 @@
+---
+title: "TP3 — Corrección del error de temperatura del NWS con ML"
+subtitle: "Taller de Análisis de Datos I · UNSAM 2026 · Grupo 3 (US East)"
+author: "Matías Bacalhau, Gonzalo Agustín Jara, Jorge Alberto Miraglia, Florencia Montti"
+date: 2026-11-18
+lang: es
+format:
+  typst:
+    papersize: a4
+    margin: {x: 2cm, y: 2cm}
+    fontsize: 10pt
+    toc: true
+    section-numbering: "1."
+    include-in-header:
+      text: |
+        #show table: set text(size: 8pt)
+filters:
+  - ancho_imagenes.lua
+---
+
+::: {.callout-note}
+## Fuente de este informe
+Todos los gráficos y las tablas vienen de [`notebooks/comparacion_modelos.ipynb`](../notebooks/comparacion_modelos.ipynb). Se insertan desde las salidas guardadas en la notebook, sin copiarlos.
+
+La notebook solo lee archivos versionados (`salidas/`, `app/datos/` y `figuras/`), así que se puede volver a correr desde cualquier clon del repositorio. Sus tablas usan punto decimal.
+:::
+
+# Problema y datos
+
+El NWS publica pronósticos horarios de temperatura. Queremos **corregirlos**: predecir el error `observado − pronosticado` y sumárselo al pronóstico. Un error positivo quiere decir que el pronóstico quedó corto.
+
+- **Datos:** el dataset fusionado del TP1. Son 55 días (10/09 → 09/11/2026), 32,6 M de filas (estación × hora objetivo × horizonte) y horizontes de 1 a 48 h. Hay 516 estaciones con datos en los días de reporte.
+- **Calidad:** de los 55 días, 6 no tienen archivo fuente. Una regla automática excluye otros 7 por exceso de observaciones faltantes, entre ellos el apagón del NWS del 22 al 26/10. Quedan **48 días usables**.
+- **Evaluación:** el entrenamiento admite huecos interpolados de hasta 3 h, pero toda métrica se mide **solo sobre observaciones reales**.
+- **Historia incompleta:** 11 de los 48 días tienen alguno de los 3 días previos faltante o excluido. En esos días parte de las variables con memoria queda vacía. Se reportan aparte.
+- **Variables:** 51, en 8 familias. Todas usan información disponible hasta la hora objetivo − horizonte − 2 h. Lo controla una prueba automática ([`src/verificar_features.py`](../src/verificar_features.py)).
+- **Métrica principal:** MAE de la temperatura corregida, en °C. También reportamos RMSE, sesgo, mediana y percentiles de |error|.
+
+# Validación cruzada
+
+Usamos **walk-forward** con ventana expansiva, cortes por día de la hora objetivo y 2 días de gap. No usamos k-fold con mezcla, por dos razones: los errores están autocorrelacionados en el tiempo, y cada hora objetivo aparece hasta 48 veces, una por horizonte.
+
+- **Pliegues:** hay 5, anclados al 30/09/2026, con 5 días de prueba cada uno.
+- **Pliegues 1–2:** eligen los hiperparámetros, que después quedan congelados.
+- **Pliegues 3–5 (15 días, 6,76 M de filas):** reportan las métricas. Ningún modelo los usó para elegir nada.
+- **Código:** [`src/validacion.py`](../src/validacion.py).
+
+# Baselines: el piso a superar
+
+Antes de usar ML medimos cuánto corrigen cuatro reglas simples, en los 5 pliegues y sobre las mismas filas:
+
+- **B0, NWS crudo:** la referencia sin corrección.
+- **B1, sesgo global:** suma el error medio de todo el entrenamiento.
+- **B2, estación × hora solar:** suma el error medio de cada estación a cada hora solar.
+- **B3, persistencia:** suma el último error conocido.
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-baselines >}}
+
+- **B1 no supera a B0:** 1,488 contra 1,487 °C. El sesgo neto cambia de signo entre semanas (−0,23 °C en el pliegue 3, +0,38 °C en el 5), así que un desplazamiento fijo no sirve.
+- **B2 baja el MAE un 6,3 %** (1,487 → 1,393 °C) sin usar información reciente. Es el baseline a superar.
+- **B3 solo compite a 1 h.** Con historia completa le gana a B2 a esa distancia (1,237 contra 1,262 °C). Pero el error deja de estar correlacionado a las pocas horas, y en total es un 32 % peor que el NWS crudo (1,962 °C).
+
+# Los dos modelos
+
+## Variables y ablación por familias
+
+Las 51 variables se agrupan en 8 familias:
+
+| Familia | Qué contiene |
+|---|---|
+| base (18) | El pronóstico vigente: temperatura, humedad, rocío, viento, condición, probabilidad de lluvia, hora solar, elevación del sol, latitud y longitud |
+| pendiente (1) | La pendiente del pronóstico (°C/h) |
+| rezagos (4) | El último error conocido, sus medias de 3 y 6 h y el error de ayer a la misma hora |
+| sesgo EWMA (4) | El sesgo de la estación, como promedio exponencial (α = 0,05; 0,1; 0,2; 0,3) |
+| revisión (4) | Cuánto cambió el pronóstico respecto del emitido 3, 6, 12 y 24 h antes |
+| vecinos (2) | El error reciente de hasta 5 estaciones a menos de 100 km |
+| rezagos extra (9) | Rezagos de 9 a 21 h y errores recientes del pronóstico a 1 h |
+| dinámica (9) | Tendencias y saltos recientes de la observación y del error |
+
+La **ablación** saca una familia por vez del Ridge y mide cuánto empeora el MAE en los pliegues de elección. La **regla de recorte** se fijó antes de ver los resultados: se saca una familia si, sin ella, el MAE no empeora más de 0,005 °C de promedio ni más de 0,010 °C en ningún pliegue.
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-ablacion >}}
+
+- **Quedan 5 familias:** base, sesgo EWMA, pendiente, rezagos y revisión. Revisión queda porque en el pliegue 2 empeora 0,014 °C.
+- **Salen 3:** vecinos, rezagos extra y dinámica. Rezagos extra mueve la predicción, pero repite lo que ya dicen los rezagos: por eso sacarla no cambia el error.
+
+## Modelo que prioriza la interpretabilidad: Ridge con curvas
+
+Script: [`src/modelos/ridge.py`](../src/modelos/ridge.py). Salidas: [`salidas/ridge/`](../salidas/ridge/).
+
+Es una regresión lineal con penalización L2, sobre las 5 familias que dejó la ablación.
+
+- **Variables con curva (splines):** la hora solar (con un spline periódico), la pendiente del pronóstico, la anomalía, la depresión del rocío y el viento. Cada una se lee como una curva en °C.
+- **Indicador de enfriamiento nocturno:** noche × despejado × viento < 10 km/h.
+- **Interacciones:** el último error conocido con un peso que depende del horizonte, y el sesgo × noche.
+- **Tamaño:** 30 variables y 103 parámetros.
+- **Hiperparámetro:** la penalización, α = 10⁵, elegida en una grilla de 1 a 10⁷.
+
+## Modelo que prioriza minimizar el error: LightGBM
+
+Script: [`src/modelos/lgbm.py`](../src/modelos/lgbm.py). Salidas: [`salidas/lgbm/`](../salidas/lgbm/).
+
+- **Variables:** gradient boosting con las **8 familias** (51 variables). No imputa faltantes y trata la condición del tiempo como variable categórica.
+- **Sin identificador de estación:** el sesgo de cada estación entra por los sesgos EWMA.
+- **Grilla:** `num_leaves` ∈ {31, 127}, pérdida L2 o L1, y de 50 a 500 árboles.
+- **Elegido:** 127 hojas, pérdida **L1** y **150 árboles**.
+
+## Experimento: OLS con selección por RFE
+
+Además de esos dos modelos, exploramos **una segunda caja de cristal**: regresión lineal sin penalización (OLS) con selección de variables por RFE, una por una, sobre las 8 familias. **No es el modelo interpretable de la entrega**; lo usamos para contrastar si conviene regularizar o seleccionar variables. Código: [`src/modelos/ols_rfe.py`](../src/modelos/ols_rfe.py).
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-ridge-vs-rfe >}}
+
+- **Más chico:** elige 21 variables, contra 30 del Ridge. Pero toca 7 familias y 4 fuentes de datos, contra 5 y 3.
+- **Pierde a 1 h:** RFE saca `err_ult` (1,150 contra 1,063 °C a esa distancia). En el resto de los horizontes casi empata.
+- **Menos legible:** sin penalización, los 4 sesgos EWMA se compensan con coeficientes grandes de signo alternado (−0,75, +2,10, −2,46, +1,39). En el Ridge son chicos y positivos (0,05–0,08), así que cada uno se puede interpretar.
+- **Por qué el Ridge sigue siendo el interpretable:** un modelo más chico no resultó más simple de explicar.
+
+# Comparación de performance
+
+## Métricas globales y calibración
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-metricas >}}
+
+- **Mejora sobre el NWS crudo:** el Ridge baja el MAE un 11,7 % y LightGBM un 15,0 % (1,541 → 1,310 °C). OLS + RFE baja un 11,2 % y B2 un 6,5 %.
+- **Errores grandes:** la fracción de filas con |error| > 3 °C baja de 11,4 % a 8,2 % con el Ridge y a 7,6 % con LightGBM.
+- **Las colas mejoran menos que el centro:** el P99 de |error| baja solo de 5,00 a 4,74 °C.
+- **Sesgo:** el Ridge deja el sesgo medio más cerca de cero (0,026 °C). LightGBM deja 0,055 °C, porque eligió pérdida L1, que apunta a la mediana y no a la media. El NWS tiene 0,106 °C.
+- **Fila a fila:** LightGBM mejora el 59 % de las filas y empeora el 40 %; el Ridge, el 58 % y el 42 %. LightGBM empeora en más de 1 °C un 6,7 % de las filas, contra 5,5 % del Ridge.
+- **Calibración:** las dos correcciones están muy correlacionadas (r = 0,845) y siguen la diagonal de calibración. Su desvío (0,87 y 1,00 °C) es la mitad del desvío del error del NWS (1,94 °C): predicen solo la parte sistemática del error.
+
+## Elección de hiperparámetros, pliegues e historia
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-pliegues-historia >}}
+
+- **Sin sobreajuste en la elección:** la curva de LightGBM es plana alrededor de 150 árboles (1,2126 °C, contra 1,2127 con 200).
+- **La mejora se mantiene en los pliegues de reporte:** entre 11,6 y 18,4 % para LightGBM y entre 8,1 y 14,7 % para el Ridge.
+- **El pliegue 3 es el más difícil:** todos los modelos mejoran menos ahí, incluso B2. Esa semana tuvo 28 % de horas con lluvia o tormenta, y el sesgo neto del NWS se invirtió (de +0,02 a −0,23 °C).
+- **Historia incompleta:** el NWS rinde peor esos días (1,561 contra 1,519 °C). Los modelos mejoran más en términos relativos (Ridge −14,3 %, LightGBM −17,3 %). El segmento con historia completa es el que representa la operación normal.
+
+## Error según el horizonte
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-horizonte >}}
+
+- **La mayor ganancia está en las primeras horas.** A 1 h, el Ridge (1,063 °C) y LightGBM (1,034 °C) bajan el MAE un 23–25 % respecto del NWS (1,380 °C). Ahí pesa el último error conocido.
+- **El peso de ese error se apaga:** en el Ridge cae de 0,31 °C por °C a 1 h a 0,10 a 6 h, 0,06 a 24 h y 0,03 a 48 h.
+- **A 48 h los dos modelos quedan muy cerca** (1,521 contra 1,542 °C), pero siguen por debajo de B2 (1,598 °C). Lo que queda de capacidad predictiva viene del sesgo propio de cada estación y de errores sistemáticos del pronóstico.
+- **Cuánto del error se anticipa:** la correlación entre la corrección y el error del NWS va de 0,63–0,65 a 1 h a 0,37–0,40 a 48 h.
+
+## Ciclo diurno y condición del tiempo
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-hora-condicion >}}
+
+- **Ciclo diurno:** el error medio del NWS oscila 2,62 °C a lo largo del día. B2 lo baja a 0,49 °C, el Ridge a 0,41 y LightGBM a 0,33.
+- **Despejado** (44 % de las filas): es donde más ayuda la corrección (Ridge −18 %, LightGBM −23 %). Es consistente con el enfriamiento nocturno de −0,81 °C que estima el Ridge.
+- **Lluvia y nublado:** casi no ayuda (5–8 %). Solo tenemos la probabilidad de lluvia, no la cantidad pronosticada.
+- **Nieve:** son 13 mil filas de pocos episodios, así que su 31 % no es generalizable.
+
+## Por estación
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-estacion >}}
+
+- **Mejora mediana por estación:** 14,5 % con LightGBM y 11,2 % con el Ridge.
+- **Estaciones donde empeora:** 17 con LightGBM y 18 con el Ridge, de 516. Muchas tienen pocas filas en los 15 días de reporte.
+- **Lat y lon no identifican estaciones.** Su aporte en LightGBM casi no se relaciona con el sesgo histórico de cada estación (r = 0,23, r² ≈ 5 %). Los sesgos EWMA, en cambio, sí (r = 0,78). Las coordenadas aportan un efecto regional.
+
+## ¿Las diferencias son reales o ruido?
+
+Las filas de un mismo día no son independientes, porque comparten el mismo tiempo meteorológico. Por eso la unidad de la prueba es el **día de prueba** (15 días): t pareado sobre la diferencia diaria de MAE, más un IC 95 % por bootstrap con 10 000 réplicas. Un valor negativo en `A − B` quiere decir que gana A.
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-por-dia >}}
+
+- **LightGBM − Ridge:** −0,051 °C por día (IC 95 % de −0,071 a −0,033), con p = 0,0002. Gana 14 de 15 días.
+  - Con historia completa gana 7 de 7, con p = 0,0006.
+- **Ridge − B2:** −0,080 °C por día, 14 de 15 días.
+- **B2 − B0:** −0,101 °C por día, 13 de 15 días.
+- **Ridge − OLS + RFE:** −0,008 °C por día, con p = 0,06.
+  - Con historia completa empatan (p = 0,81).
+  - Con historia incompleta gana el Ridge (−0,013 °C, p = 0,01).
+
+# Interpretabilidad e incertidumbre
+
+Cada modelo se interpreta con una herramienta distinta:
+
+- **Ridge:** sus coeficientes y curvas *son* el modelo, así que se leen directamente.
+- **LightGBM:** necesita **SHAP** (TreeSHAP), que descompone cada corrección en cuánto aportó cada variable, en °C. Se calcula sobre 100 000 filas de prueba.
+
+Las figuras de interpretación salen del modelo del último pliegue y las genera [`src/interpretar.py`](../src/interpretar.py). La banda de confianza la calibra [`src/preparar_dashboard.py`](../src/preparar_dashboard.py).
+
+{{< embed ../notebooks/comparacion_modelos.ipynb#cmp-interpretabilidad >}}
+
+**Ridge: qué corrige cada variable (curvas en °C)**
+
+- **Enfriamiento nocturno: −0,81 °C.** En noches despejadas y calmas el NWS pronostica de más; es la inversión por radiación.
+- **Pendiente del pronóstico:** casi lineal, de −0,8 a +0,9 °C. Cuando el pronóstico sube rápido, la observación queda por encima.
+- **Hora solar:** −0,4 °C a las 15 h y +0,2 °C de madrugada.
+- **Variables con más peso:** la pendiente del pronóstico (0,34 °C), el enfriamiento nocturno (0,28), la hora solar (0,24), la condición (0,19), la depresión del rocío (0,18), el viento (0,17) y el error de ayer (0,17).
+- **Estabilidad:** los coeficientes se correlacionan 0,939 entre los pliegues 3 y 5, así que su lectura no depende del período.
+
+**LightGBM: SHAP**
+
+- **Mismas variables dominantes que el Ridge:** la pendiente del pronóstico mueve la corrección 0,23 °C en promedio. Le siguen el viento (0,15), el sesgo EWMA con α = 0,3 (0,15), la condición (0,12) y la probabilidad de lluvia (0,11).
+- **Lo que suma LightGBM** son combinaciones de condiciones que un modelo aditivo no tiene escritas. Su ventaja aparece sobre todo entre 3 y 24 h (sección 5.3).
+
+**Banda de confianza P10–P90 (dashboard)**
+
+- **Cubre menos de lo prometido:** 73,8 % con el Ridge y 75,0 % con LightGBM, contra el 80 % esperado.
+- **Causa:** la banda se calibró en los pliegues 1–2, que fueron semanas más fáciles que las de reporte. El dashboard muestra la cobertura real junto a la esperada.
+
+# Conclusiones
+
+1. **¿El modelo complejo se justifica?**
+   - LightGBM es el de menor error: MAE 1,310 °C, contra 1,361 del Ridge y 1,541 del NWS crudo.
+   - Le gana al Ridge 14 de 15 días, y 7 de 7 con historia completa. La diferencia es real pero chica: 0,05 °C, cerca del 4 % del MAE.
+2. **¿Cuánto aporta el ML sobre una tabla de promedios?**
+   - B2 ya mejora 0,10 °C por día sobre el NWS.
+   - El Ridge suma 0,08 °C más y LightGBM 0,13 °C, sobre todo en las primeras horas.
+3. **¿Qué aprendieron?** Los dos se apoyan en lo mismo:
+   - la pendiente del pronóstico;
+   - el sesgo propio de cada estación;
+   - el enfriamiento nocturno en noches despejadas y calmas;
+   - la persistencia del error durante pocas horas.
+
+   El Ridge lo dice en °C, con curvas estables entre pliegues y el sesgo medio más cercano a cero. Captura cerca del 78 % de la mejora de LightGBM.
+4. **¿Regularizar o seleccionar variables?** OLS + RFE da un modelo más chico, pero no más explicable: sin penalización, las variables colineales se compensan. El Ridge es el modelo interpretable de la entrega.
+5. **¿Dónde no sirve?** Con lluvia, en unas pocas estaciones y a 48 h, donde la ventaja sobre B2 se achica.
+6. **¿Es confiable fila a fila?** No del todo:
+   - empeora el 40–42 % de las filas;
+   - la banda de confianza cubre 75 % y no 80 %.
+
+**Producto:** `config.yaml` (`producto.modelo`) define cuál de los dos modelos se entrena con todos los días. El dashboard permite ver la corrección de cualquiera de los dos.
+
+**Limitaciones:**
+
+- Son 55 días de un solo período (10/09 → 09/11/2026), sin invierno ni verano.
+- Hay 15 días de reporte.
+- No validamos dejando estaciones afuera, así que no sabemos qué pasa con estaciones nuevas.
+
+# Reproducibilidad
+
+| Qué | Dónde |
+|---|---|
+| Modelo interpretable | `src/modelos/ridge.py` → `salidas/ridge/` |
+| Modelo de menor error | `src/modelos/lgbm.py` → `salidas/lgbm/` |
+| Experimento OLS + RFE | `src/modelos/ols_rfe.py` → `salidas/ols_rfe/` |
+| Comparación (gráficos y tablas de este informe) | `notebooks/comparacion_modelos.ipynb` |
+| Prueba por días | `src/comparar_modelos.py` → `salidas/comparacion/` |
+| Interpretación | `src/interpretar.py` → `figuras/` |
+| Dashboard | `app/dashboard.py` (instrucciones en `entregaTP3/dashboard.md`) |
+| Decisiones | `DECISIONES.md` |
+| Parámetros y entorno | `config.yaml`, `requirements.txt` |
