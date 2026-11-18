@@ -27,10 +27,12 @@ from scipy import stats
 import modelos.ridge as MI
 import modelos.lgbm as ML
 import cache
-from modelado import RAIZ, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, pliegues_eleccion_reporte, preparar_prueba
+from modelado import RAIZ, SALIDAS, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, pliegues_eleccion_reporte, preparar_prueba
 
 PARES = [("lgbm", "lineal"), ("lineal", "B2"), ("lgbm", "B2"), ("B2", "B0")]
+PARES_RFE = [("lineal", "ols_rfe"), ("lgbm", "ols_rfe"), ("ols_rfe", "B2")]
 N_BOOT = 10000
+VER_DIR = SALIDAS / "comparacion"
 
 
 def predicciones_por_dia(reporte):
@@ -63,6 +65,12 @@ def predicciones_por_dia(reporte):
         filas.append(agg)
     D = pd.concat(filas).reset_index()
     D["historia"] = np.where(D["dia"].isin(set(dias_historia_incompleta())), "incompleta", "completa")
+    rfe_dia = SALIDAS / "ols_rfe" / "por_dia.csv"
+    if rfe_dia.exists():
+        R = pd.read_csv(rfe_dia).rename(columns={"n": "n_rfe"})
+        M = D.merge(R, on=["pliegue", "dia"], how="left")
+        if M["ols_rfe"].notna().all() and (M["n_rfe"] == M["n"]).all():
+            D["ols_rfe"] = M["ols_rfe"]
     return D
 
 
@@ -75,18 +83,27 @@ def prueba(d, rng):
             "dias_gana_A": int((d < 0).sum())}
 
 
+def tabla_significancia(D, seed=SEMILLA):
+    pares = list(PARES) + (list(PARES_RFE) if "ols_rfe" in D.columns else [])
+    rng = np.random.default_rng(seed)
+    res = []
+    for seg, x in [("todas", D)] + list(D.groupby("historia")):
+        for a, b in pares:
+            res.append({"segmento": seg, "A": a, "B": b, **prueba((x[a] - x[b]).to_numpy(), rng)})
+    return pd.DataFrame(res)
+
+
 def main():
     _, reporte = pliegues_eleccion_reporte()
     D = predicciones_por_dia(reporte)
+    R = tabla_significancia(D, seed=SEMILLA)
+    VER_DIR.mkdir(parents=True, exist_ok=True)
+    D.to_csv(VER_DIR / "por_dia.csv", index=False)
+    R.to_csv(VER_DIR / "significancia.csv", index=False)
     salida = RAIZ / "data" / "resultados"
-    D.to_csv(salida / "comparacion_por_dia.csv", index=False)
-    rng = np.random.default_rng(SEMILLA)
-    res = []
-    for seg, x in [("todas", D)] + list(D.groupby("historia")):
-        for a, b in PARES:
-            res.append({"segmento": seg, "A": a, "B": b, **prueba((x[a] - x[b]).to_numpy(), rng)})
-    R = pd.DataFrame(res)
-    R.to_csv(salida / "comparacion_significancia.csv", index=False)
+    if salida.exists():
+        D.to_csv(salida / "comparacion_por_dia.csv", index=False)
+        R.to_csv(salida / "comparacion_significancia.csv", index=False)
     pd.set_option("display.width", 200)
     print("\nMAE por día (°C):")
     print(D.round(3).to_string(index=False))

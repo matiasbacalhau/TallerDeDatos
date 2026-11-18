@@ -1,0 +1,69 @@
+{
+  "base": [
+    "temp_pron",
+    "temp_anom",
+    "elev_solar",
+    "noche",
+    "hum_pron",
+    "rocio_pron",
+    "dep_rocio",
+    "viento_vel",
+    "viento_sin",
+    "viento_cos",
+    "viento_calmo",
+    "prob_lluvia",
+    "condicion",
+    "horizonte",
+    "hora_solar_sin",
+    "hora_solar_cos",
+    "lat",
+    "lon"
+  ],
+  "pendiente": [
+    "pendiente_pron"
+  ],
+  "rezagos": [
+    "err_ult",
+    "err_media3",
+    "err_media6",
+    "err_ayer"
+  ],
+  "sesgo_ewma": [
+    "sesgo_ewma_05",
+    "sesgo_ewma_10",
+    "sesgo_ewma_20",
+    "sesgo_ewma_30"
+  ],
+  "vecinos": [
+    "vec_err_ult",
+    "vec_err_1h"
+  ],
+  "revision": [
+    "rev_3h",
+    "rev_6h",
+    "rev_12h",
+    "rev_24h"
+  ],
+  "rezagos_extra": [
+    "err_hace9h",
+    "err_hace12h",
+    "err_hace15h",
+    "err_hace18h",
+    "err_hace21h",
+    "err1h_ult",
+    "err1h_media2",
+    "err1h_media4",
+    "err1h_media8"
+  ],
+  "dinamica": [
+    "obs_tend3h",
+    "err1h_tend3h",
+    "salto_obs",
+    "err_rocio_ult",
+    "err_rocio_1h",
+    "err_std6",
+    "err_std24",
+    "dispersion_emis",
+    "amplitud_pron"
+  ]
+}
