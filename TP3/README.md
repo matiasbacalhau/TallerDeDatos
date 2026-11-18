@@ -3,6 +3,8 @@
 Trabajo en curso de Matías Bacalhau. Consigna: `Consigna TP3.pdf`. Las decisiones tomadas y su
 justificación están en `DECISIONES.md` (se actualiza a medida que avanza el trabajo).
 
+**Entrega TP3:** índice de los 4 entregables (modelos, informe y dashboard) en [`entregaTP3/`](entregaTP3/README.md).
+
 ## Estado
 Hecho: preparación de datos, control de calidad con exclusión automática de días y alarmas, validación walk-forward con pliegues anclados, baselines (B0–B3) y feature engineering (familias 1–8).
 Hecho también: experimentación por familias (`notebooks/experimentos.ipynb`), Ridge de caja de cristal con las familias que elige la regla de recorte y LightGBM con las 8 familias.
