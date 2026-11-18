@@ -1,0 +1,11 @@
+rank,variable,familia,shap_media_abs_C
+1,pendiente_pron,pendiente,0.23
+2,viento_vel,base,0.15
+3,sesgo_ewma_30,sesgo_ewma,0.15
+4,condicion,base,0.119
+5,prob_lluvia,base,0.115
+6,sesgo_ewma_20,sesgo_ewma,0.112
+7,dep_rocio,base,0.106
+8,hora_solar_sin,base,0.093
+9,hora_solar_cos,base,0.078
+10,temp_anom,base,0.072

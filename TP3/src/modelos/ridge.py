@@ -45,6 +45,7 @@ from sklearn.linear_model import Ridge
 from sklearn.preprocessing import SplineTransformer, StandardScaler
 
 import cache
+from features import FAMILIAS as _FAMILIAS_CODIGO
 from formato import dec, n as n_
 from modelado import CFG, RAIZ, SALIDAS, SEMILLA, cargar_entrenamiento, dias_historia_incompleta, evaluar, pliegues_eleccion_reporte, preparar_prueba
 from ridge_gram import Gram
@@ -52,7 +53,8 @@ from ridge_gram import Gram
 P = CFG["modelos"]["interpretable"]
 SALIDA = SALIDAS / "ridge"                     # resultados de este modelo
 VERSION = 2                                   # cambia si cambia la forma de la matriz (invalida la caché)
-FAMILIAS = json.loads((RAIZ / "data" / "features" / "familias.json").read_text())
+_RUTA_FAMILIAS = RAIZ / "data" / "features" / "familias.json"
+FAMILIAS = json.loads(_RUTA_FAMILIAS.read_text()) if _RUTA_FAMILIAS.exists() else _FAMILIAS_CODIGO
 TODAS = list(FAMILIAS)
 FAMILIA_DE = {c: f for f, cols in FAMILIAS.items() for c in cols}
 CONDICIONES = ["despejado", "parcial", "nublado", "lluvia", "tormenta", "niebla", "nieve", "otro"]

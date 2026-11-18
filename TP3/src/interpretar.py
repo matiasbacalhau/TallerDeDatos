@@ -174,7 +174,7 @@ def figura_sesgo_hora(M):
     for i, (n, etiqueta) in enumerate(MODELOS.items()):
         a.plot(M.index, M[n], color=SERIE[i], label=etiqueta, marker="o", markersize=3)
     a.set(xlabel="hora solar", ylabel="error medio restante (°C, observado − corregido)", xticks=range(0, 24, 3),
-          xlim=(-0.5, 23.5), title="Sesgo restante por hora del día (pliegues 3–4)")
+          xlim=(-0.5, 23.5), title="Sesgo restante por hora del día (pliegues 3–5)")
     a.legend(loc="upper left", ncols=4, fontsize=8, bbox_to_anchor=(0, -0.15))
     guardar(fig, "interp_sesgo_hora.png")
 
